@@ -1,6 +1,6 @@
-import { Suspense, useRef, useCallback, type RefObject } from "react";
+import { Suspense, useRef, useCallback, useEffect, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Text, MeshTransmissionMaterial, Environment } from "@react-three/drei";
+import { Text, MeshTransmissionMaterial, Environment, useGLTF } from "@react-three/drei";
 import { Physics, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -11,7 +11,19 @@ import * as THREE from "three";
 const BOUNDS = 3.5;
 const PUSH_STRENGTH = 8;
 
-function useBoundaryForce(rigidRef: RefObject<RapierRigidBody | null>) {
+const Z_SPRING = 4;
+
+function CustomShape() {
+    const gltf = useGLTF("/L.glb");
+    const mesh = gltf.scene.children.find(child => child instanceof THREE.Mesh) as THREE.Mesh;
+    if (!mesh?.geometry) return <boxGeometry args={[1, 1, 1]} />;
+    
+    const geom = mesh.geometry.clone();
+    geom.scale(0.3, 0.3, 0.3);
+    return <primitive object={geom} attach="geometry" />;
+}
+
+function useBoundaryForce(rigidRef: RefObject<RapierRigidBody | null>, startZ = 0) {
     useFrame(() => {
         const body = rigidRef.current;
         if (!body) return;
@@ -23,14 +35,17 @@ function useBoundaryForce(rigidRef: RefObject<RapierRigidBody | null>) {
         if (pos.y < -BOUNDS) fy = PUSH_STRENGTH;
         if (pos.z > BOUNDS) fz = -PUSH_STRENGTH;
         if (pos.z < -BOUNDS) fz = PUSH_STRENGTH;
+        // Spring force pulling cube back to its start Z
+        const zDiff = startZ - pos.z;
+        fz += zDiff * Z_SPRING;
         if (fx || fy || fz) {
             body.applyImpulse({ x: fx * 0.016, y: fy * 0.016, z: fz * 0.016 }, true);
         }
     });
 }
 
-/* ── Draggable glass cube ───────────────────── */
-function GlassCube() {
+/* ── Draggable glass shape ──────────────────────── */
+function GlassCube({ position = [0, 0, 0], shape = "cube" }: { position?: [number, number, number]; shape?: "cube" | "sphere" | "custom" }) {
     const rigidRef = useRef<RapierRigidBody>(null);
     const meshRef = useRef<THREE.Mesh>(null);
     const isDragging = useRef(false);
@@ -40,7 +55,7 @@ function GlassCube() {
     const velocity = useRef(new THREE.Vector3());
     const { camera, raycaster } = useThree();
 
-    useBoundaryForce(rigidRef);
+    useBoundaryForce(rigidRef, position[2]);
 
     useFrame(() => {
         if (!rigidRef.current || isDragging.current) return;
@@ -87,6 +102,7 @@ function GlassCube() {
             body.setLinvel({ x: 0, y: 0, z: 0 }, true);
             body.setAngvel({ x: 0, y: 0, z: 0 }, true);
             body.setGravityScale(0, true);
+            body.setBodyType(2, true); // kinematic
 
             (e as unknown as { target: HTMLElement }).target?.setPointerCapture?.(
                 (e as unknown as PointerEvent).pointerId,
@@ -111,9 +127,8 @@ function GlassCube() {
             );
             prevWorldPos.current.copy(target);
 
-            rigidRef.current.setTranslation(
+            rigidRef.current.setNextKinematicTranslation(
                 { x: target.x, y: target.y, z: target.z },
-                true,
             );
         },
         [planeIntersect],
@@ -122,6 +137,7 @@ function GlassCube() {
     const onPointerUp = useCallback(() => {
         if (!isDragging.current || !rigidRef.current) return;
         isDragging.current = false;
+        rigidRef.current.setBodyType(0, true); // back to dynamic
         rigidRef.current.setGravityScale(0, true);
         const v = velocity.current;
         rigidRef.current.setLinvel({ x: v.x, y: v.y, z: v.z }, true);
@@ -134,11 +150,14 @@ function GlassCube() {
     return (
         <RigidBody
             ref={rigidRef}
-            colliders="cuboid"
-            position={[0, 0, 0]}
+            colliders="trimesh"
+            position={position}
             linearDamping={1.2}
             angularDamping={0.8}
             gravityScale={0}
+            restitution={0.8}
+            friction={0.2}
+            canSleep={false}
         >
             <mesh
                 ref={meshRef}
@@ -147,18 +166,25 @@ function GlassCube() {
                 onPointerUp={onPointerUp}
                 onPointerLeave={onPointerUp}
             >
-                <boxGeometry args={[1.2, 1.2, 1.2]} />
+                {shape === "sphere" ? (
+                    <sphereGeometry args={[0.6, 32, 32]} />
+                ) : shape === "custom" ? (
+                    <CustomShape />
+                ) : (
+                    <boxGeometry args={[1.2, 1.2, 1.2]} />
+                )}
                 <MeshTransmissionMaterial
                     backside
                     backsideThickness={0.3}
                     samples={6}
+                    transmission={1}
                     thickness={0.5}
                     chromaticAberration={0.05}
                     anisotropy={0.1}
-                    distortion={0.5}
-                    distortionScale={0.3}
-                    temporalDistortion={0.3}
-                    roughness={0.0}
+                    distortion={0.08}
+                    distortionScale={0.15}
+                    temporalDistortion={0.05}
+                    roughness={0.12}
                     ior={1.5}
                     color="#ffffff"
                 />
@@ -167,12 +193,36 @@ function GlassCube() {
     );
 }
 
+/* ── Camera parallax ─────────────────────────── */
+function CameraRig() {
+    const { camera } = useThree();
+    const mouse = useRef({ x: 0, y: 0 });
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            mouse.current.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.current.y = -((e.clientY / window.innerHeight) * 2 - 1);
+        };
+        window.addEventListener("mousemove", handler);
+        return () => window.removeEventListener("mousemove", handler);
+    }, []);
+
+    useFrame(() => {
+        camera.position.x += (-mouse.current.x * 0.2 - camera.position.x) * 0.05;
+        camera.position.y += (-mouse.current.y * 0.15 - camera.position.y) * 0.05;
+        camera.lookAt(0, 0, 0);
+    });
+
+    return null;
+}
+
 /* ── Background text ────────────────────────── */
 function BackgroundText() {
     return (
         <Text
             position={[0, 0, -3]}
             fontSize={2.5}
+            fontWeight="bold"
             letterSpacing={0.15}
             color="#444444"
             anchorX="center"
@@ -187,14 +237,15 @@ function BackgroundText() {
 function SceneContent() {
     return (
         <>
-            <color attach="background" args={["#050505"]} />
             <ambientLight intensity={0.5} />
             <directionalLight position={[5, 5, 5]} intensity={1} />
             <directionalLight position={[-3, -1, -3]} intensity={0.3} />
             <Environment preset="city" />
+            <CameraRig />
             <BackgroundText />
             <Physics gravity={[0, 0, 0]}>
-                <GlassCube />
+                <GlassCube position={[-2.5, 0, 0]} shape="cube" />
+                <GlassCube position={[2.5, 0, 0]} shape="custom" />
             </Physics>
         </>
     );
@@ -269,7 +320,7 @@ export default function ExampleRotatingCube() {
             </nav>
 
             {/* 3D Canvas */}
-            <div className="glass h-[80vh] w-full overflow-hidden rounded-lg">
+            <div className="h-[80vh] w-full overflow-hidden rounded-lg border border-border backdrop-blur-sm" style={{ background: "transparent" }}>
                 <Canvas camera={{ position: [0, 0, 5], fov: 45 }} style={{ cursor: "grab" }}>
                     <Suspense fallback={null}>
                         <SceneContent />
@@ -290,78 +341,6 @@ export default function ExampleRotatingCube() {
                 Physics lets you grab and throw it. Boundary forces push it back into view.
                 The text behind it distorts through the glass.
             </p>
-
-            {/* Code */}
-            <section className="mb-12">
-                <h2 className="mb-4 text-xs uppercase tracking-[0.2em] text-text-muted">
-                    Code
-                </h2>
-                <div className="glass overflow-hidden rounded-lg">
-                    <SyntaxHighlighter
-                        language="tsx"
-                        style={oneDark}
-                        customStyle={{
-                            margin: 0,
-                            borderRadius: 0,
-                            fontSize: "0.8rem",
-                            background: "rgba(0,0,0,0.4)",
-                            border: "none",
-                        }}
-                    >
-                        {codeSnippet}
-                    </SyntaxHighlighter>
-                </div>
-            </section>
-
-            {/* Concepts */}
-            <section className="mb-12">
-                <h2 className="mb-5 text-xs uppercase tracking-[0.2em] text-text-muted">
-                    Concepts
-                </h2>
-                <div className="grid gap-3 sm:grid-cols-2">
-                    <ConceptCard title="MeshTransmissionMaterial">
-                        <p>
-                            From <code>@react-three/drei</code>. Simulates glass with real light transmission,
-                            refraction (<code>ior</code>), chromatic aberration and distortion noise.
-                        </p>
-                    </ConceptCard>
-
-                    <ConceptCard title="Physics with Rapier">
-                        <p>
-                            <code>@react-three/rapier</code> adds a full physics engine.
-                            Wrap objects in <code>&lt;RigidBody&gt;</code> to give them mass, velocity and collision.
-                        </p>
-                    </ConceptCard>
-
-                    <ConceptCard title="Drag and Throw">
-                        <p>
-                            Track pointer movement on a camera-facing plane. On release, apply the
-                            accumulated velocity as an impulse for a natural throw.
-                        </p>
-                    </ConceptCard>
-
-                    <ConceptCard title="Boundary Forces">
-                        <p>
-                            Each frame, check if the cube exceeds the bounds. If so, apply an
-                            impulse pushing it back — a soft invisible wall.
-                        </p>
-                    </ConceptCard>
-
-                    <ConceptCard title="Environment Map">
-                        <p>
-                            <code>&lt;Environment&gt;</code> from drei provides an HDR environment map.
-                            Glass needs something to reflect and refract to look convincing.
-                        </p>
-                    </ConceptCard>
-
-                    <ConceptCard title="3D Text">
-                        <p>
-                            <code>&lt;Text&gt;</code> from drei (via troika) renders sharp text in the scene.
-                            Placed behind the cube so it distorts through the glass.
-                        </p>
-                    </ConceptCard>
-                </div>
-            </section>
 
             {/* Tools table */}
             <section className="mb-12">
