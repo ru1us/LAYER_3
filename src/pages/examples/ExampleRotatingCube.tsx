@@ -3,8 +3,6 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Text, MeshTransmissionMaterial, Environment, useGLTF } from "@react-three/drei";
 import { Physics, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { Link } from "react-router-dom";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import * as THREE from "three";
 
 /* ── Boundary force ─────────────────────────── */
@@ -248,61 +246,6 @@ function SceneContent() {
                 <GlassCube position={[2.5, 0, 0]} shape="custom" />
             </Physics>
         </>
-    );
-}
-
-/* ── Code snippet ───────────────────────────── */
-const codeSnippet = `import { Text, MeshTransmissionMaterial, Environment } from "@react-three/drei";
-import { Physics, RigidBody } from "@react-three/rapier";
-
-function GlassCube() {
-  return (
-    <RigidBody colliders="cuboid" gravityScale={0} linearDamping={1.2}>
-      <mesh>
-        <boxGeometry args={[1.2, 1.2, 1.2]} />
-        <MeshTransmissionMaterial
-          backside
-          thickness={0.5}
-          chromaticAberration={0.15}
-          distortion={0.4}
-          transmission={0.98}
-          roughness={0.05}
-          ior={1.5}
-        />
-      </mesh>
-    </RigidBody>
-  );
-}
-
-function Scene() {
-  return (
-    <Canvas camera={{ position: [0, 0, 5], fov: 45 }}>
-      <Environment preset="city" />
-      <Text position={[0, 0, -3]} fontSize={2.5} color="#333">
-        LAYER_3
-      </Text>
-      <Physics gravity={[0, 0, 0]}>
-        <GlassCube />
-      </Physics>
-    </Canvas>
-  );
-}`;
-
-/* ── Concept card ───────────────────────────── */
-function ConceptCard({
-    title,
-    children,
-}: {
-    title: string;
-    children: React.ReactNode;
-}) {
-    return (
-        <div className="glass rounded-lg p-5">
-            <h3 className="mb-2 text-sm font-medium text-text">{title}</h3>
-            <div className="text-xs leading-relaxed text-text-muted [&_code]:rounded [&_code]:border [&_code]:border-border [&_code]:bg-bg [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_code]:text-accent">
-                {children}
-            </div>
-        </div>
     );
 }
 
