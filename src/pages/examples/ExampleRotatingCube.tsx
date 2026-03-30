@@ -5,7 +5,6 @@ import { Physics, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { Link } from "react-router-dom";
 import * as THREE from "three";
 
-/* ── Boundary force ─────────────────────────── */
 const BOUNDS = 3.5;
 const PUSH_STRENGTH = 8;
 
@@ -42,7 +41,6 @@ function useBoundaryForce(rigidRef: RefObject<RapierRigidBody | null>, startZ = 
     });
 }
 
-/* ── Draggable glass shape ──────────────────────── */
 function GlassCube({ position = [0, 0, 0], shape = "cube" }: { position?: [number, number, number]; shape?: "cube" | "sphere" | "custom" }) {
     const rigidRef = useRef<RapierRigidBody>(null);
     const meshRef = useRef<THREE.Mesh>(null);
@@ -84,12 +82,10 @@ function GlassCube({ position = [0, 0, 0], shape = "cube" }: { position?: [numbe
             const body = rigidRef.current;
             if (!body) return;
 
-            // Create drag plane perpendicular to camera at the cube's current Z
             const bodyPos = body.translation();
             const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
             dragPlane.current.setFromNormalAndCoplanarPoint(camDir, new THREE.Vector3(bodyPos.x, bodyPos.y, bodyPos.z));
 
-            // Calculate offset between hit point and body center so cube doesn't snap
             const hitWorld = planeIntersect(e.pointer);
             if (hitWorld) {
                 dragOffset.current.set(bodyPos.x - hitWorld.x, bodyPos.y - hitWorld.y, bodyPos.z - hitWorld.z);
@@ -175,14 +171,14 @@ function GlassCube({ position = [0, 0, 0], shape = "cube" }: { position?: [numbe
                     backside
                     backsideThickness={0.3}
                     samples={6}
-                    transmission={1}
+                    transmission={0.99}
                     thickness={0.5}
-                    chromaticAberration={0.05}
+                    chromaticAberration={0.2}
                     anisotropy={0.1}
                     distortion={0.08}
                     distortionScale={0.15}
                     temporalDistortion={0.05}
-                    roughness={0.12}
+                    roughness={0.24}
                     ior={1.5}
                     color="#ffffff"
                 />
@@ -222,7 +218,7 @@ function BackgroundText() {
             fontSize={2.5}
             fontWeight="bold"
             letterSpacing={0.15}
-            color="#444444"
+            color="#e7e7e7"
             anchorX="center"
             anchorY="middle"
         >
@@ -238,7 +234,7 @@ function SceneContent() {
             <ambientLight intensity={0.5} />
             <directionalLight position={[5, 5, 5]} intensity={1} />
             <directionalLight position={[-3, -1, -3]} intensity={0.3} />
-            <Environment preset="city" />
+            <color attach="background" args={["#000000"]} />
             <CameraRig />
             <BackgroundText />
             <Physics gravity={[0, 0, 0]}>
