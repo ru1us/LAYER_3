@@ -171,14 +171,14 @@ function GlassCube({ position = [0, 0, 0], shape = "cube" }: { position?: [numbe
                     backside
                     backsideThickness={0.3}
                     samples={6}
-                    transmission={0.99}
+                    transmission={0.97}
                     thickness={0.5}
                     chromaticAberration={0.2}
                     anisotropy={0.1}
                     distortion={0.08}
                     distortionScale={0.15}
                     temporalDistortion={0.05}
-                    roughness={0.24}
+                    roughness={0.2}
                     ior={1.5}
                     color="#ffffff"
                 />
@@ -235,6 +235,7 @@ function SceneContent() {
             <directionalLight position={[5, 5, 5]} intensity={1} />
             <directionalLight position={[-3, -1, -3]} intensity={0.3} />
             <color attach="background" args={["#000000"]} />
+            {/* <Environment preset="city" blur={1}/> */}
             <CameraRig />
             <BackgroundText />
             <Physics gravity={[0, 0, 0]}>
