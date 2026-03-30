@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #050505;
+  --color-surface: #0a0a0a;
+  --color-glass: rgba(255, 255, 255, 0.01);
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-border-hover: rgba(255, 255, 255, 0.12);
+  --color-text: #e0e0e0;
+  --color-text-muted: #666666;
+  --color-accent: #888888;
+  --color-dot: rgba(255, 255, 255, 0.07);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: "Geist", system-ui, -apple-system, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(var(--color-dot) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+a {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--color-text);
+}
+
+/* Glass card utility */
+.glass {
+  background: var(--color-glass);
+  border: 1px solid var(--color-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Leva panel override */
+[id^="leva"] {
+  --leva-colors-elevation1: #0a0a0a !important;
+  --leva-colors-elevation2: #111111 !important;
+  --leva-colors-elevation3: #1a1a1a !important;
+}
