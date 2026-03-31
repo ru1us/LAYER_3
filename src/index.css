@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #050505;
+  --color-bg: #111111;
   --color-surface: #0a0a0a;
   --color-glass: rgba(255, 255, 255, 0.01);
   --color-border: rgba(255, 255, 255, 0.06);
@@ -46,9 +46,3 @@ a:hover {
   -webkit-backdrop-filter: blur(16px);
 }
 
-/* Leva panel override */
-[id^="leva"] {
-  --leva-colors-elevation1: #0a0a0a !important;
-  --leva-colors-elevation2: #111111 !important;
-  --leva-colors-elevation3: #1a1a1a !important;
-}

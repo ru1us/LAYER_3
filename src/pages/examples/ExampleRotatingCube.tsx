@@ -131,7 +131,7 @@ function GlassCube({ position = [0, 0, 0], shape = "cube" }: { position?: [numbe
     const onPointerUp = useCallback(() => {
         if (!isDragging.current || !rigidRef.current) return;
         isDragging.current = false;
-        rigidRef.current.setBodyType(0, true); // back to dynamic
+        rigidRef.current.setBodyType(0, true);
         rigidRef.current.setGravityScale(0, true);
         const v = velocity.current;
         rigidRef.current.setLinvel({ x: v.x, y: v.y, z: v.z }, true);
