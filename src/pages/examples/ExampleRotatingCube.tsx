@@ -11,7 +11,7 @@ const PUSH_STRENGTH = 8;
 const Z_SPRING = 4;
 
 function CustomShape() {
-    const gltf = useGLTF("/L.glb");
+    const gltf = useGLTF("L.glb");
     const mesh = gltf.scene.children.find(child => child instanceof THREE.Mesh) as THREE.Mesh;
     if (!mesh?.geometry) return <boxGeometry args={[1, 1, 1]} />;
     

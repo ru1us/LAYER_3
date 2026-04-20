@@ -56,7 +56,7 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
 };
 
 function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRefObject<THREE.Vector3>; baseWorldPos: React.MutableRefObject<THREE.Vector3> }) {
-  const gltf = useGLTF("/robot2.glb");
+  const gltf = useGLTF("robot2.glb");
   const { scene, camera } = useThree();
   const glbCamApplied = useRef(false);
 
@@ -124,7 +124,7 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
 
     // ── Apply roughness map texture to all materials ──────────────────────────
     const textureLoader = new THREE.TextureLoader();
-    textureLoader.load("/metalroughness.png", (roughnessTexture) => {
+    textureLoader.load("metalroughness.png", (roughnessTexture) => {
       roughnessTexture.colorSpace = THREE.SRGBColorSpace;
       gltf.scene.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
@@ -527,5 +527,5 @@ export default function HeroWind() {
   );
 }
 
-useGLTF.preload("/robot2.glb");
+useGLTF.preload("robot2.glb");
 
