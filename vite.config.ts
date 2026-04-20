@@ -3,6 +3,6 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  base: "/layer_3/",
+  base: "/LAYER_3/",
   plugins: [react(), tailwindcss()],
 });

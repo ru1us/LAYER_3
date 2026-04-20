@@ -4,7 +4,7 @@ import App from "./App.tsx";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <BrowserRouter basename="/layer_3">
+  <BrowserRouter basename="/LAYER_3">
     <App />
   </BrowserRouter>
 );
