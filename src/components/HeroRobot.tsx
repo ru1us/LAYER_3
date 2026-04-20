@@ -1,31 +1,21 @@
 import { useGLTF, Environment } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
-import { Physics, RigidBody, RapierRigidBody } from "@react-three/rapier";
+import { Physics, RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
 import * as THREE from "three";
 import { BallModel } from "./BallModel";
 
-// ── Kinematic chain from GLB ─────────────────────────────────────────────────
+
 // Armature → Bone (base) → Bone.001 → Bone.002 → Bone.003 → Bone.004 → Bone.005
 // All bones are stacked vertically (Y translations).
-//
-// Bone       = base turntable (Y-rotation swivel)
-// Bone.001–Bone.004 = arm pitch joints (CCD IK)
 // Bone.005   = end-effector tip
 
 interface BoneConfig {
   axis: "x" | "y" | "z";
-  min: number; // angle limit in radians
-  max: number; // angle limit in radians
+  min: number; 
+  max: number; 
 }
 
-// ── Configure each bone: axis of rotation + angle limits ──────────────────
-// Bone names are sanitized by Three.js (Bone.001 → Bone001, Bone.005 → Bone005)
-// Adjust per your rigged Blender bones!
-//
-// Example: { axis: "z", min: -Math.PI/2, max: Math.PI/2 }
-// Use ±Infinity for no limits
-// Per-bone follow speed (0–1). Base slowest → tip fastest = natural motion.
 const BONE_FOLLOW: Record<string, number> = {
   "Bone":    0.035,
   "Bone001": 0.045,
@@ -36,7 +26,7 @@ const BONE_FOLLOW: Record<string, number> = {
   "Bone006": 0.095, 
 };
 
-// How fast the IK target itself smooths toward the cursor (0–1)
+// How fast the IK target smooths toward the cursor (0–1)
 const TARGET_SMOOTH = 0.08;
 
 const BONE_CONFIG: Record<string, BoneConfig> = {
@@ -55,8 +45,8 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
   "endeffector": { axis: "z", min: -Infinity, max: Infinity },
 };
 
-function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRefObject<THREE.Vector3>; baseWorldPos: React.MutableRefObject<THREE.Vector3> }) {
-  const gltf = useGLTF("robot2.glb");
+function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3> }) {
+  const gltf = useGLTF("/robot2.glb");
   const { scene, camera } = useThree();
   const glbCamApplied = useRef(false);
 
@@ -88,7 +78,6 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
 
   useEffect(() => {
     scene.background = new THREE.Color("#f0ede8");
-    scene.fog = new THREE.Fog("#f0ede8", 30, 60);
 
     // ── GLB camera ──────────────────────────────────────────────────────────
     if (!glbCamApplied.current) {
@@ -124,7 +113,7 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
 
     // ── Apply roughness map texture to all materials ──────────────────────────
     const textureLoader = new THREE.TextureLoader();
-    textureLoader.load("metalroughness.png", (roughnessTexture) => {
+    textureLoader.load("/metalroughness.png", (roughnessTexture) => {
       roughnessTexture.colorSpace = THREE.SRGBColorSpace;
       gltf.scene.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
@@ -133,6 +122,7 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
           materials.forEach((mat) => {
             if ("roughness" in mat) {
               (mat as any).roughnessMap = roughnessTexture;
+              (mat as any).roughness = 1.0;
               mat.needsUpdate = true;
             }
           });
@@ -155,9 +145,6 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
     printTree(gltf.scene);
     console.groupEnd();
 
-    // ── Find joints by walking the bone chain ────────────────────────────────
-    // Three.js GLTFLoader sanitizes names (Bone.005 → Bone_005 etc.)
-    // So instead of name lookup, find the base "Bone" node and walk children.
     const nameMap = new Map<string, THREE.Object3D>();
     gltf.scene.traverse((obj) => {
       if (obj.name) nameMap.set(obj.name, obj);
@@ -236,7 +223,6 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
   const smoothTarget = useRef(new THREE.Vector3());
   const smoothInitialized = useRef(false);
 
-  // ── Two planes for cursor projection ──────────────────────────────────────
   // 1. Ground plane (horizontal, Y-up) at robot base height
   // 2. Back plane (camera-facing, vertical) just behind the robot
   // We test BOTH and pick the closest valid hit.
@@ -252,18 +238,17 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
 
     const v = _v.current;
 
-    // ── Setup both planes ──────────────────────────────────────────────────
     base.getWorldPosition(v.basePos);
     groundY.current = v.basePos.y;
-    // Ground plane at Y=0 (actual floor level)
-    groundPlane.current.set(new THREE.Vector3(0, 1, 0), 0);
+    // Ground plane raised by ball radius so grabbed ball sits on the surface
+    groundPlane.current.set(new THREE.Vector3(0, 1, 0), -BALL_RADIUS);
     // Back plane: camera-facing, 30cm behind the robot
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
     const backPoint = v.basePos.clone().addScaledVector(camDir, 0.3);
     backPlane.current.setFromNormalAndCoplanarPoint(camDir.clone().negate(), backPoint);
 
-    // ── Raycast onto BOTH planes, pick nearest valid hit ────────────────────
+    // Raycast onto BOTH planes, pick nearest valid hit
     raycaster.current.setFromCamera(mouseNDC.current, camera);
     const ray = raycaster.current.ray;
 
@@ -392,8 +377,8 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
 
   return (
     <>
-      <Environment preset="studio" />
-      <ambientLight intensity={0.3} color="#ffffff" />
+      <Environment preset="studio" environmentIntensity={0.6} />
+      <ambientLight intensity={0.01} color="#ffffff" />
       <primitive object={gltf.scene} />
     </>
   );
@@ -401,22 +386,40 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.MutableRef
 
 // ── Interactive Ball with rigid body ─────────────────────────────────────────
 const BALL_RADIUS = 0.04;
-const BALL_START: [number, number, number] = [0.15, 0.6, 0.15];
-const ARM_REACH = 0.8; // max distance from base before ball is pushed back
-const MAGNET_RANGE = 0.2; // distance within which cursor "aims" at the ball
+const MAGNET_RANGE = 0.2;
+const OFFSCREEN_Y = -0.5;
+const SPAWN_RANGE_X = 0.4;
+const SPAWN_RANGE_Z = 0.4;
+
+function randomSkySpawn(): [number, number, number] {
+  const x = (Math.random() - 0.5) * SPAWN_RANGE_X * 2;
+  const y = 2.5 + Math.random() * 0.5;
+  const z = (Math.random() - 0.5) * SPAWN_RANGE_Z * 2;
+  return [x, y, z];
+}
 
 function InteractiveBall({
   eeWorldPos,
   mouseDown,
-  baseWorldPos,
 }: {
-  eeWorldPos: React.MutableRefObject<THREE.Vector3>;
-  mouseDown: React.MutableRefObject<boolean>;
-  baseWorldPos: React.MutableRefObject<THREE.Vector3>;
+  eeWorldPos: React.RefObject<THREE.Vector3>;
+  mouseDown: React.RefObject<boolean>;
+  baseWorldPos: React.RefObject<THREE.Vector3>;
 }) {
   const rigidRef = useRef<RapierRigidBody>(null);
   const wasHeld = useRef(false);
   const prevEEPos = useRef(new THREE.Vector3());
+  const spawnPos = useRef<[number, number, number]>(randomSkySpawn());
+
+  const respawn = () => {
+    const rb = rigidRef.current;
+    if (!rb) return;
+    const next = randomSkySpawn();
+    spawnPos.current = next;
+    rb.setTranslation({ x: next[0], y: next[1], z: next[2] }, true);
+    rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  };
 
   useFrame(() => {
     const rb = rigidRef.current;
@@ -425,38 +428,28 @@ function InteractiveBall({
     const pos = rb.translation();
     const ballPos = new THREE.Vector3(pos.x, pos.y, pos.z);
 
-    // ── Out-of-bounds: push ball back toward base ─────────────────────────
-    const base = baseWorldPos.current;
-    const distFromBase = ballPos.distanceTo(base);
-    if (distFromBase > ARM_REACH) {
-      const pushDir = base.clone().sub(ballPos).normalize().multiplyScalar(3);
-      rb.applyImpulse({ x: pushDir.x, y: 0.5, z: pushDir.z }, true);
+    // ── Respawn when ball leaves the scene ───────────────────────────────
+    if (pos.y < OFFSCREEN_Y || Math.abs(pos.x) > 5 || Math.abs(pos.z) > 5) {
+      respawn();
+      return;
     }
 
-    // ── Keep ball above ground ──────────────────────────────────────────────
-    if (pos.y < BALL_RADIUS) {
-      rb.setTranslation({ x: pos.x, y: BALL_RADIUS, z: pos.z }, true);
-    }
-
-    // ── Magnet: if mouse held and EE close to ball, snap ball to EE ─────────
+    // ── Magnet: if mouse held and EE close to ball, snap ball to EE ─────
     if (mouseDown.current) {
       const eePos = eeWorldPos.current;
       const distToEE = ballPos.distanceTo(eePos);
       if (distToEE < MAGNET_RANGE) {
-        // Snap ball directly to EE without interpolation
         rb.setTranslation({ x: eePos.x, y: eePos.y, z: eePos.z }, true);
-        // Zero velocity while held to prevent gravity interference
         rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
         rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        // Update EE position for next frame's velocity calculation
         prevEEPos.current.copy(eePos);
       }
     }
 
-    // ── Drop ball on release: restore velocity based on EE motion ─────────
+    // ── Drop ball on release: give it EE throw velocity ─────────────────
     if (wasHeld.current && !mouseDown.current) {
       const eePos = eeWorldPos.current;
-      const eeVelocity = eePos.clone().sub(prevEEPos.current).multiplyScalar(60); // 60 FPS estimate
+      const eeVelocity = eePos.clone().sub(prevEEPos.current).multiplyScalar(60);
       rb.setLinvel({ x: eeVelocity.x, y: eeVelocity.y, z: eeVelocity.z }, true);
     }
     wasHeld.current = mouseDown.current;
@@ -465,20 +458,21 @@ function InteractiveBall({
   return (
     <RigidBody
       ref={rigidRef}
-      position={BALL_START}
+      position={spawnPos.current}
       colliders="ball"
       restitution={0.6}
       friction={0.8}
-      linearDamping={1.5}
-      angularDamping={1.0}
+      linearDamping={0.3}
+      angularDamping={0.5}
       mass={0.1}
+      ccd
     >
       <BallModel />
     </RigidBody>
   );
 }
 
-export default function HeroWind() {
+export default function HeroRobot() {
   const eeWorldPos = useRef(new THREE.Vector3());
   const baseWorldPos = useRef(new THREE.Vector3());
   const mouseDown = useRef(false);
@@ -501,21 +495,16 @@ export default function HeroWind() {
         gl={{
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.2,
+          toneMappingExposure: 0.7,
         }}
         shadows
       >
         <Physics gravity={[0, -9.81, 0]}>
           <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} />
           {/* Grid floor */}
-          <gridHelper args={[10, 10, "#888888", "#d0d0d0"]} position={[0, 0.001, 0]} />
-          {/* Invisible ground collider */}
-          <RigidBody type="fixed" position={[0, 0, 0]}>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-              <planeGeometry args={[10, 10]} />
-              <meshStandardMaterial transparent opacity={0} />
-            </mesh>
-          </RigidBody>
+          <gridHelper args={[10, 10, "#888888", "#d0d0d0"]} position={[0, 0, 0]} />
+          {/* Ground collider – explicit CuboidCollider so it's always reliable */}
+          <CuboidCollider args={[50, 0.5, 50]} position={[0, -0.5, 0]} />
           <InteractiveBall
             eeWorldPos={eeWorldPos}
             mouseDown={mouseDown}
@@ -527,5 +516,5 @@ export default function HeroWind() {
   );
 }
 
-useGLTF.preload("robot2.glb");
+useGLTF.preload("/robot2.glb");
 
