@@ -1,6 +1,6 @@
 import { Suspense, useRef, useCallback, useEffect, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Text, MeshTransmissionMaterial, Environment, useGLTF } from "@react-three/drei";
+import { Text, MeshTransmissionMaterial, useGLTF } from "@react-three/drei";
 import { Physics, RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import { Link } from "react-router-dom";
 import * as THREE from "three";
@@ -218,7 +218,7 @@ function BackgroundText() {
             fontSize={2.5}
             fontWeight="bold"
             letterSpacing={0.15}
-            color="#e7e7e7"
+            color="#c8c4bc"
             anchorX="center"
             anchorY="middle"
         >
@@ -234,7 +234,7 @@ function SceneContent() {
             <ambientLight intensity={0.5} />
             <directionalLight position={[5, 5, 5]} intensity={1} />
             <directionalLight position={[-3, -1, -3]} intensity={0.3} />
-            <color attach="background" args={["#000000"]} />
+            <color attach="background" args={["#f0ede8"]} />
             {/* <Environment preset="city" blur={1}/> */}
             <CameraRig />
             <BackgroundText />
@@ -249,18 +249,33 @@ function SceneContent() {
 /* ── Page ────────────────────────────────────── */
 export default function ExampleRotatingCube() {
     return (
-        <div className="mx-auto w-full px-8 py-8">
+        <div className="mx-auto w-full pt-24" style={{ padding: "5rem 3rem", paddingTop: "7rem" }}>
             {/* Breadcrumb */}
-            <nav className="mb-2 text-xs tracking-wide text-text-muted">
-                <Link to="/" className="hover:text-text">
+            <nav
+                className="mb-2"
+                style={{
+                    fontFamily: "monospace",
+                    fontSize: "0.7rem",
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: "#777770",
+                }}
+            >
+                <Link to="/" className="hover:text-text transition-colors">
                     Home
                 </Link>
-                <span className="mx-2 opacity-30">/</span>
-                <span className="text-text">Glass Cube</span>
+                <span className="mx-2" style={{ opacity: 0.3 }}>/</span>
+                <span style={{ color: "#111111" }}>Glass Cube</span>
             </nav>
 
             {/* 3D Canvas */}
-            <div className="h-[80vh] w-full overflow-hidden rounded-lg border border-border backdrop-blur-sm" style={{ background: "transparent" }}>
+            <div
+                className="h-[80vh] w-full overflow-hidden relative notch-all-lg"
+                style={{
+                    background: "#e8e4de",
+                    border: "1px solid #c8c4bc",
+                }}
+            >
                 <Canvas camera={{ position: [0, 0, 5], fov: 45 }} style={{ cursor: "grab" }}>
                     <Suspense fallback={null}>
                         <SceneContent />
@@ -268,15 +283,16 @@ export default function ExampleRotatingCube() {
                 </Canvas>
             </div>
             <div className="mx-auto max-w-6xl">
-            <p className="mt-4 mb-12 text-center text-xs text-text-muted">
+            <p
+                className="mt-4 mb-12 text-center"
+                style={{ fontFamily: "monospace", fontSize: "0.7rem", color: "#777770", letterSpacing: "0.08em" }}
+            >
                 Grab the cube and throw it &middot; It refracts the text behind it &middot; Boundary forces keep it in view
             </p>
 
-            <p className="mb-2 text-xs uppercase tracking-[0.2em] text-text-muted">
-                Beginner
-            </p>
-            <h1 className="mb-4 text-3xl font-light tracking-tight">Glass Cube</h1>
-            <p className="mb-10 max-w-lg text-sm leading-relaxed text-text-muted">
+            <p className="section-label mb-3">Beginner</p>
+            <h1 style={{ fontSize: "2rem", color: "#111111", marginBottom: "1rem" }}>Glass Cube</h1>
+            <p style={{ fontFamily: "monospace", fontSize: "0.8rem", letterSpacing: "0.08em", color: "#777770", maxWidth: 500, lineHeight: 1.7, marginBottom: "3rem" }}>
                 A glass cube with transmission, refraction and chromatic aberration.
                 Physics lets you grab and throw it. Boundary forces push it back into view.
                 The text behind it distorts through the glass.
@@ -284,19 +300,17 @@ export default function ExampleRotatingCube() {
 
             {/* Tools table */}
             <section className="mb-12">
-                <h2 className="mb-4 text-xs uppercase tracking-[0.2em] text-text-muted">
-                    Tools used
-                </h2>
-                <div className="glass overflow-hidden rounded-lg">
-                    <table className="w-full text-xs">
+                <p className="section-label mb-4">Tools used</p>
+                <div className="notch-all overflow-hidden" style={{ border: "1px solid #c8c4bc" }}>
+                    <table className="w-full" style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
                         <thead>
-                            <tr className="border-b border-border">
-                                <th className="px-4 py-3 text-left font-medium text-text-muted">Tool</th>
-                                <th className="px-4 py-3 text-left font-medium text-text-muted">Package</th>
-                                <th className="px-4 py-3 text-left font-medium text-text-muted">Purpose</th>
+                            <tr style={{ borderBottom: "1px solid #c8c4bc", background: "#e8e4de" }}>
+                                <th className="px-4 py-3 text-left" style={{ fontWeight: 500, color: "#777770", letterSpacing: "0.12em", textTransform: "uppercase", fontSize: "0.65rem" }}>Tool</th>
+                                <th className="px-4 py-3 text-left" style={{ fontWeight: 500, color: "#777770", letterSpacing: "0.12em", textTransform: "uppercase", fontSize: "0.65rem" }}>Package</th>
+                                <th className="px-4 py-3 text-left" style={{ fontWeight: 500, color: "#777770", letterSpacing: "0.12em", textTransform: "uppercase", fontSize: "0.65rem" }}>Purpose</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-border">
+                        <tbody>
                             {[
                                 ["MeshTransmissionMaterial", "@react-three/drei", "Glass with refraction and noise"],
                                 ["RigidBody", "@react-three/rapier", "Physics body for the cube"],
@@ -304,15 +318,22 @@ export default function ExampleRotatingCube() {
                                 ["Environment", "@react-three/drei", "HDR environment for reflections"],
                                 ["useFrame", "@react-three/fiber", "Per-frame boundary force check"],
                                 ["raycaster", "Three.js", "Pointer-to-3D plane intersection"],
-                            ].map(([tool, pkg, purpose]) => (
-                                <tr key={tool} className="hover:bg-glass-hover">
+                            ].map(([tool, pkg, purpose], i) => (
+                                <tr
+                                    key={tool}
+                                    className="transition-colors hover:bg-surface-hover"
+                                    style={{
+                                        borderBottom: i < 5 ? "1px solid #c8c4bc" : "none",
+                                        background: i % 2 === 0 ? "#f0ede8" : "#e8e4de",
+                                    }}
+                                >
                                     <td className="px-4 py-3">
-                                        <code className="rounded border border-border bg-bg px-1.5 py-0.5 text-[11px] text-accent">
+                                        <code className="tag">
                                             {tool}
                                         </code>
                                     </td>
-                                    <td className="px-4 py-3 text-text-muted">{pkg}</td>
-                                    <td className="px-4 py-3 text-text-muted">{purpose}</td>
+                                    <td className="px-4 py-3" style={{ color: "#777770" }}>{pkg}</td>
+                                    <td className="px-4 py-3" style={{ color: "#777770" }}>{purpose}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -321,7 +342,7 @@ export default function ExampleRotatingCube() {
             </section>
 
             <div className="pb-10">
-                <Link to="/" className="text-xs text-text-muted hover:text-text transition-colors">
+                <Link to="/" className="btn-secondary">
                     &larr; Back to overview
                 </Link>
             </div>
