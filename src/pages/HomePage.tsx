@@ -1,43 +1,5 @@
-import { useRef, useEffect, Suspense } from "react";
-import { Link } from "react-router-dom";
+import { useRef, Suspense } from "react";
 import HeroRobot from "../components/HeroRobot.tsx";
-
-const projects = [
-  {
-    slug: "glass-cube",
-    title: "Glass Cube",
-    description:
-      "Interactive glass cube with refraction, chromatic aberration and physics simulation. Grab, throw, observe.",
-    tags: ["Physics", "Transmission", "Interactive"],
-    route: "/projects/glass-cube",
-  },
-  {
-    slug: "wind-turbine",
-    title: "Wind Turbine",
-    description:
-      "Scroll-based 3D visualization of a wind turbine with embedded camera and atmospheric effects.",
-    tags: ["Scroll", "GLB Camera", "Atmosphere"],
-    route: "/",
-  },
-  {
-    slug: "robot-arm",
-    title: "Robot Arm",
-    description:
-      "Controllable robot arm kinematics with inverse kinematics and real-time manipulation.",
-    tags: ["IK", "Controls", "Animation"],
-    route: "/",
-  },
-  {
-    slug: "solar-panel",
-    title: "Solar Panel",
-    description:
-      "Interactive solar panel visualization with light incidence simulation and energy yield display.",
-    tags: ["Light", "Simulation", "Data"],
-    route: "/",
-  },
-];
-
-const notchClasses = ["notch-tl", "notch-tr", "notch-br", "notch-bl"];
 
 export default function HomePage() {
   const heroRef = useRef<HTMLDivElement>(null);
