@@ -1,6 +1,6 @@
 import { useGLTF, Environment } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Physics, RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
 import * as THREE from "three";
 import { BallModel } from "./BallModel";
@@ -35,7 +35,7 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
 
   // Arm pitch joints (edit these to limit each joint)
   "Bone001": { axis: "x", min: -Math.PI/2, max: Math.PI/2 },
-  "Bone002": { axis: "y", min: -Math.PI/4, max: Math.PI/4 },
+  "Bone002": { axis: "y", min: -Math.PI/2, max: Math.PI/2},
   "Bone003": { axis: "x", min: 0, max: Math.PI/1.2 },
   "Bone004": { axis: "y", min: -Math.PI/4, max: Math.PI/4 },
   "Bone005": { axis: "x", min: -Math.PI/4, max: Math.PI /4},
@@ -246,7 +246,7 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
     const backPoint = v.basePos.clone().addScaledVector(camDir, 0.3);
-    backPlane.current.setFromNormalAndCoplanarPoint(camDir.clone().negate(), backPoint);
+    if (backPlane.current) backPlane.current.setFromNormalAndCoplanarPoint(camDir.clone().negate(), backPoint);
 
     // Raycast onto BOTH planes, pick nearest valid hit
     raycaster.current.setFromCamera(mouseNDC.current, camera);
@@ -387,7 +387,6 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
 // ── Interactive Ball with rigid body ─────────────────────────────────────────
 const BALL_RADIUS = 0.04;
 const MAGNET_RANGE = 0.2;
-const OFFSCREEN_Y = -0.5;
 const SPAWN_RANGE_X = 0.4;
 const SPAWN_RANGE_Z = 0.4;
 
@@ -398,77 +397,134 @@ function randomSkySpawn(): [number, number, number] {
   return [x, y, z];
 }
 
+const MAX_BALLS = 6;
+
 function InteractiveBall({
   eeWorldPos,
   mouseDown,
+  isActive,
+  onOffscreen,
 }: {
   eeWorldPos: React.RefObject<THREE.Vector3>;
   mouseDown: React.RefObject<boolean>;
-  baseWorldPos: React.RefObject<THREE.Vector3>;
+  isActive: boolean;
+  onOffscreen: () => void;
 }) {
   const rigidRef = useRef<RapierRigidBody>(null);
   const wasHeld = useRef(false);
+  const isHeld = useRef(false);
   const prevEEPos = useRef(new THREE.Vector3());
-  const spawnPos = useRef<[number, number, number]>(randomSkySpawn());
+  const initPos = useRef<[number, number, number]>(randomSkySpawn());
+  const spawnTime = useRef(performance.now());
+  const offscreenFired = useRef(false);
 
-  const respawn = () => {
-    const rb = rigidRef.current;
-    if (!rb) return;
-    const next = randomSkySpawn();
-    spawnPos.current = next;
-    rb.setTranslation({ x: next[0], y: next[1], z: next[2] }, true);
-    rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  };
-
-  useFrame(() => {
+  useFrame(({ camera }) => {
     const rb = rigidRef.current;
     if (!rb) return;
 
     const pos = rb.translation();
     const ballPos = new THREE.Vector3(pos.x, pos.y, pos.z);
 
-    // ── Respawn when ball leaves the scene ───────────────────────────────
-    if (pos.y < OFFSCREEN_Y || Math.abs(pos.x) > 5 || Math.abs(pos.z) > 5) {
-      respawn();
-      return;
+    // ── Active ball: detect leaving screen ──────────────────────────────
+    if (isActive && !offscreenFired.current) {
+      const sinceSpawn = performance.now() - spawnTime.current;
+      if (sinceSpawn > 1500) {
+        const ndc = ballPos.clone().project(camera);
+        if (Math.abs(ndc.x) > 1.1 || Math.abs(ndc.y) > 1.1) {
+          offscreenFired.current = true;
+          onOffscreen();
+          return;
+        }
+      }
     }
 
-    // ── Magnet: if mouse held and EE close to ball, snap ball to EE ─────
+    // ── Only active ball responds to magnet & throw ──────────────────────
+    if (!isActive) return;
+
+    // ── Magnet: pull ball toward EE, snap when close enough ─────────────
     if (mouseDown.current) {
       const eePos = eeWorldPos.current;
       const distToEE = ballPos.distanceTo(eePos);
       if (distToEE < MAGNET_RANGE) {
-        rb.setTranslation({ x: eePos.x, y: eePos.y, z: eePos.z }, true);
-        rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        if (distToEE < 0.06) {
+          // Close enough: lock to EE so it follows perfectly
+          rb.setTranslation({ x: eePos.x, y: eePos.y, z: eePos.z }, true);
+          rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        } else {
+          // Still approaching: velocity pull
+          const toEE = eePos.clone().sub(ballPos);
+          const speed = Math.min(distToEE * 40, 8);
+          const pullVel = toEE.normalize().multiplyScalar(speed);
+          rb.setLinvel({ x: pullVel.x, y: pullVel.y, z: pullVel.z }, true);
+          rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        }
         prevEEPos.current.copy(eePos);
+        isHeld.current = true;
       }
+    } else {
+      isHeld.current = false;
     }
 
     // ── Drop ball on release: give it EE throw velocity ─────────────────
-    if (wasHeld.current && !mouseDown.current) {
+    if (wasHeld.current && !isHeld.current) {
       const eePos = eeWorldPos.current;
       const eeVelocity = eePos.clone().sub(prevEEPos.current).multiplyScalar(60);
       rb.setLinvel({ x: eeVelocity.x, y: eeVelocity.y, z: eeVelocity.z }, true);
     }
-    wasHeld.current = mouseDown.current;
+    wasHeld.current = isHeld.current;
   });
 
   return (
     <RigidBody
       ref={rigidRef}
-      position={spawnPos.current}
+      position={initPos.current}
       colliders="ball"
-      restitution={0.6}
-      friction={0.8}
-      linearDamping={0.3}
-      angularDamping={0.5}
+      restitution={0.85}
+      friction={0.6}
+      linearDamping={0.05}
+      angularDamping={0.1}
       mass={0.1}
       ccd
     >
       <BallModel />
     </RigidBody>
+  );
+}
+
+function BallSpawner({
+  eeWorldPos,
+  mouseDown,
+}: {
+  eeWorldPos: React.RefObject<THREE.Vector3>;
+  mouseDown: React.RefObject<boolean>;
+}) {
+  const [firstId] = useState(() => Date.now());
+  const [balls, setBalls] = useState<number[]>([firstId]);
+  const [activeId, setActiveId] = useState<number>(firstId);
+
+  const handleOffscreen = useCallback((id: number) => {
+    const newId = Date.now() + Math.random();
+    setBalls(prev => {
+      const without = prev.filter(b => b !== id);
+      const next = [...without, newId];
+      return next.length > MAX_BALLS ? next.slice(next.length - MAX_BALLS) : next;
+    });
+    setActiveId(newId);
+  }, []);
+
+  return (
+    <>
+      {balls.map(id => (
+        <InteractiveBall
+          key={id}
+          isActive={id === activeId}
+          onOffscreen={() => handleOffscreen(id)}
+          eeWorldPos={eeWorldPos}
+          mouseDown={mouseDown}
+        />
+      ))}
+    </>
   );
 }
 
@@ -503,12 +559,11 @@ export default function HeroRobot() {
           <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} />
           {/* Grid floor */}
           <gridHelper args={[10, 10, "#888888", "#d0d0d0"]} position={[0, 0, 0]} />
-          {/* Ground collider – explicit CuboidCollider so it's always reliable */}
-          <CuboidCollider args={[50, 0.5, 50]} position={[0, -0.5, 0]} />
-          <InteractiveBall
+          {/* Ground collider – cut at back edge so balls roll off */}
+          <CuboidCollider args={[5, 0.5, 2]} position={[0, -0.5, 1.5]} />
+          <BallSpawner
             eeWorldPos={eeWorldPos}
             mouseDown={mouseDown}
-            baseWorldPos={baseWorldPos}
           />
         </Physics>
       </Canvas>
