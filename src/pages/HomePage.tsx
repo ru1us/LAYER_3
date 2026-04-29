@@ -1,5 +1,6 @@
 import { useRef, Suspense } from "react";
 import HeroRobot from "../components/HeroRobot.tsx";
+import ParticleSim from "../components/ParticleSim.tsx";
 
 export default function HomePage() {
   const heroRef = useRef<HTMLDivElement>(null);
@@ -56,6 +57,10 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ── Particle Sim Section ─────────────── */}
+      <ParticleSim />
+
+      
       {/* ── About / Tech Section ─────────────── */}
       <section
         id="about"
