@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, Suspense, useState } from "react";
+import { useEffect, useMemo, useRef, Suspense, useState, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import { DebugOverlay } from "./DebugOverlay";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const BALL_COUNT = 200;
@@ -28,7 +29,10 @@ interface Ball {
 }
 
 // ── Inner scene ───────────────────────────────────────────────────────────
-function Particles() {
+function Particles({ fpsRef, onLoaded }: {
+  fpsRef: React.MutableRefObject<number>;
+  onLoaded: () => void;
+}) {
   const { camera, gl } = useThree();
   const { scene: ballScene } = useGLTF("/ball.glb");
 
@@ -68,6 +72,11 @@ function Particles() {
   const meshRef   = useRef<THREE.InstancedMesh>(null);
   const balls     = useRef<Ball[]>([]);
   const mouseNDC  = useRef(new THREE.Vector2(99999, 99999));
+
+  // FPS tracking
+  const _frameCount   = useRef(0);
+  const _lastFpsTime  = useRef(performance.now());
+  const _loadedFired  = useRef(false);
 
   // Reusable scratch objects — no per-frame allocation
   const dummy      = useRef(new THREE.Object3D());
@@ -226,20 +235,23 @@ function Particles() {
         continue;
       }      dummy.current.position.set(b.x, b.y, b.z);
       dummy.current.scale.setScalar(BALL_SCALE);
-      // Only rotate when the ball is actually moving
-      const speed = Math.abs(b.vx) + Math.abs(b.vz);
-      if (speed > 0.05) {
-        b.rz -= b.vx / BALL_RADIUS;
-        b.rx += b.vz / BALL_RADIUS;
-      }
-      if (Math.abs(b.vy) > 0.05) {
-        b.ry += b.vy * 0.01;
-      }
+      // Rotation is fixed at spawn — no runtime updates
       dummy.current.rotation.set(b.rx, b.ry, b.rz);
       dummy.current.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.current.matrix);
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
+
+    // ── FPS + first-frame callback ────────────────────────────────────
+    if (!_loadedFired.current) { _loadedFired.current = true; onLoaded(); }
+    _frameCount.current++;
+    const fpsNow = performance.now();
+    const fpsElapsed = fpsNow - _lastFpsTime.current;
+    if (fpsElapsed >= 500) {
+      fpsRef.current = (_frameCount.current / fpsElapsed) * 1000;
+      _frameCount.current = 0;
+      _lastFpsTime.current = fpsNow;
+    }
   });
 
   if (!geom || !mat) return null;
@@ -254,10 +266,42 @@ function Particles() {
 
 useGLTF.preload("/ball.glb");
 
+// ── GPU name collector (must live inside Canvas) ──────────────────────────
+function GLInfo({ onInfo }: { onInfo: (gpu: string) => void }) {
+  const { gl } = useThree();
+  useEffect(() => {
+    const ctx = gl.getContext() as WebGLRenderingContext;
+    const ext = ctx.getExtension("WEBGL_debug_renderer_info");
+    const name = ext
+      ? (ctx.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string).replace(/\(.*?\)/g, "").trim()
+      : "Unknown GPU";
+    onInfo(name);
+  }, [gl, onInfo]);
+  return null;
+}
+
 // ── Public component ───────────────────────────────────────────────────────
 export default function ParticleSim() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const [loaded, setLoaded] = useState(false);
+  const sectionRef   = useRef<HTMLElement>(null);
+  const [loaded, setLoaded]       = useState(false);
+  const [instanceKey, setInstanceKey] = useState(0);
+  const [loadTime, setLoadTime]   = useState<number | null>(null);
+  const [gpu, setGpu]             = useState<string | null>(null);
+  const loadStartRef = useRef(0);
+  const fpsRef       = useRef(0);
+
+  const handleLoaded = useCallback(() => {
+    setLoadTime(performance.now() - loadStartRef.current);
+  }, []);
+
+  const handleReload = useCallback(() => {
+    loadStartRef.current = performance.now();
+    setLoadTime(null);
+    fpsRef.current = 0;
+    setInstanceKey((k) => k + 1);
+  }, []);
+
+  const handleGpu = useCallback((name: string) => setGpu(name), []);
 
   // Mount (and start) the sim when the section scrolls close to the viewport
   useEffect(() => {
@@ -293,20 +337,32 @@ export default function ParticleSim() {
 
       {loaded && (
         <Canvas
+          key={instanceKey}
           orthographic
           camera={{ position: [0, 60, 500], zoom: 1.2, near: 1, far: 10000 }}
-          gl={{ antialias: true }}
+          gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.5 }}
           style={{ width: "100%", height: "100%" }}
           onCreated={({ camera, gl }) => { camera.lookAt(0, -30, 0); gl.setClearColor("#e8e4de"); }}
         >
           <ambientLight intensity={0.35} />
           <directionalLight position={[30, 120, 90]} intensity={1.6} color="#ffffff" castShadow={false} />
           <pointLight position={[-60, 90, 60]} intensity={1.0} color="#E8FF00" />
+          <GLInfo onInfo={handleGpu} />
           <Suspense fallback={null}>
-            <Particles />
+            <Particles fpsRef={fpsRef} onLoaded={handleLoaded} />
           </Suspense>
         </Canvas>
       )}
+
+      <DebugOverlay
+        fpsRef={fpsRef}
+        loadTimeMs={loadTime}
+        onReload={handleReload}
+        stats={[
+          { label: "PARTICLES", value: BALL_COUNT },
+          { label: "GPU", value: gpu ?? "—" },
+        ]}
+      />
     </section>
   );
 }

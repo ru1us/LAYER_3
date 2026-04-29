@@ -551,7 +551,7 @@ export default function HeroRobot() {
         gl={{
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 0.7,
+          toneMappingExposure: .8,
         }}
         shadows
       >
