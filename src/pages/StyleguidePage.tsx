@@ -1,11 +1,13 @@
 export default function StyleguidePage() {
   const colors = [
-    { name: "Background", hex: "#f0ede8", css: "--color-bg" },
-    { name: "Surface", hex: "#e8e4de", css: "--color-surface" },
-    { name: "Border", hex: "#c8c4bc", css: "--color-border" },
+    { name: "Background", hex: "#F5F5F5", css: "--color-bg" },
+    { name: "Canvas / Surface", hex: "#EBEBEB", css: "--color-surface" },
+    { name: "Canvas Deep", hex: "#E0E0E0", css: "--color-surface-hover" },
+    { name: "Border", hex: "#CCCCCC", css: "--color-border" },
     { name: "Text", hex: "#111111", css: "--color-text", dark: true },
-    { name: "Muted", hex: "#777770", css: "--color-text-muted", dark: true },
+    { name: "Muted", hex: "#777777", css: "--color-text-muted", dark: true },
     { name: "Accent", hex: "#E8FF00", css: "--color-accent" },
+    { name: "Nav BG", hex: "#EBF0FF", css: "navbar bg (55% opacity)" },
   ];
 
   return (
@@ -26,11 +28,11 @@ export default function StyleguidePage() {
           {colors.map((c, i) => (
             <div
               key={c.name}
-              className={`overflow-hidden bg-surface ${["notch-tl", "notch-tr", "notch-br", "notch-bl", "notch-tl", "notch-tr"][i]}`}
+              className="overflow-hidden bg-surface border border-border rounded-lg"
             >
               <div
                 className="h-16"
-                style={{ background: c.hex, border: c.hex === "#f0ede8" ? "1px solid #c8c4bc" : "none" }}
+                style={{ background: c.hex, border: ["#F5F5F5", "#EBEBEB", "#E0E0E0"].includes(c.hex) ? "1px solid #CCCCCC" : "none" }}
               />
               <div className="px-3 py-2.5">
             <p className="font-mono text-body">{c.name}</p>
@@ -91,19 +93,19 @@ export default function StyleguidePage() {
       <section className="mb-16">
         <p className="section-label mb-6">Cards &amp; Notches</p>
         <div className="panel-grid grid grid-cols-3">
-          <div className="notch-tl p-5 bg-surface">
+          <div className="p-5 bg-surface border border-border rounded-lg">
             <h3 className="font-doto text-body mb-2">notch-tl</h3>
             <p className="font-mono text-small text-text-muted">
               Top-left corner notched. Panel grid with 1px gap creates border effect.
             </p>
           </div>
-          <div className="notch-tr p-5 bg-surface">
+          <div className="p-5 bg-surface border border-border rounded-lg">
             <h3 className="font-doto text-body mb-2">notch-tr</h3>
             <p className="font-mono text-small text-text-muted">
               Top-right corner notched. Hover adds yellow top-border accent.
             </p>
           </div>
-          <div className="notch-br p-5 bg-surface">
+          <div className="p-5 bg-surface border border-border rounded-lg">
             <h3 className="font-doto text-body mb-2">notch-br</h3>
             <p className="font-mono text-small text-text-muted">
               Bottom-right corner notched. No border-radius anywhere.
@@ -111,7 +113,7 @@ export default function StyleguidePage() {
           </div>
         </div>
         <div className="mt-4">
-          <div className="notch-tl-xl bg-surface p-6">
+          <div className="bg-surface border border-border rounded-lg p-6">
             <h3 className="font-doto text-body mb-2">notch-all-lg (24px)</h3>
             <p className="font-mono text-small text-text-muted">
               All 4 corners notched at 24px. Used for larger sections and feature containers.
@@ -123,7 +125,7 @@ export default function StyleguidePage() {
       {/* ── Tags ─────────────────────────────── */}
       <section className="mb-16">
         <p className="section-label mb-6">Tags &amp; Badges</p>
-        <div className="notch-tl-xl bg-surface p-8">
+        <div className="bg-surface border border-border rounded-lg p-8">
           <div className="flex flex-wrap gap-2">
             <span className="tag">Physics</span>
             <span className="tag">@react-three/fiber</span>
@@ -139,7 +141,7 @@ export default function StyleguidePage() {
       {/* ── Section Labels ───────────────────── */}
       <section className="mb-16">
         <p className="section-label mb-6">Section Labels</p>
-        <div className="notch-tr-xl bg-surface p-8">
+        <div className="bg-surface border border-border rounded-lg p-8">
           <p className="section-label mb-4">Example Label</p>
           <p className="font-mono text-small text-text-muted">
             Small all-caps labels flanked by 30px lines. Used above headings to categorize sections.
@@ -150,7 +152,7 @@ export default function StyleguidePage() {
       {/* ── Spacing ──────────────────────────── */}
       <section className="pb-20 mb-8">
         <p className="section-label mb-6">Spacing System</p>
-        <div className="notch-tl-xl bg-surface p-8">
+        <div className="bg-surface border border-border rounded-lg p-8">
           <div className="space-y-3">
             {[4, 8, 12, 16, 20, 24, 32, 40, 48].map((px) => (
               <div key={px} className="flex items-center gap-4">

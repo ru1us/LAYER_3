@@ -12,8 +12,8 @@ export default function HomePage() {
         <div className="sticky top-0 h-screen w-full">
           <Suspense
             fallback={
-              <div className="flex h-full items-center justify-center bg-[#f0ede8]">
-                <div className="font-mono text-[0.7rem] tracking-caps uppercase text-[#777770]">
+              <div className="flex h-full items-center justify-center bg-bg">
+                <div className="font-mono text-[0.7rem] tracking-caps uppercase text-[#777777]">
                   Loading...
                 </div>
               </div>
@@ -26,7 +26,7 @@ export default function HomePage() {
           <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none p-16">
             <div className="flex items-end gap-16">
               <div>
-                <p className="section-label mb-4">Robotics</p>
+                <p className="section-label mb-4">Inverse Kinematics</p>
                 <h1 className="font-doto text-8xl">
                   LAYER_3
                 </h1>
@@ -42,7 +42,7 @@ export default function HomePage() {
       {/* ── Projects Section ─────────────────── */}
       <section
         id="projekte"
-        className="relative z-10 grid-bg bg-[#f0ede8] px-12 py-20"
+        className="relative z-10 grid-bg bg-surface px-12 py-20"
       >
         <div className="mx-auto max-w-6xl">
           <div className="mb-12">
@@ -64,7 +64,7 @@ export default function HomePage() {
       {/* ── About / Tech Section ─────────────── */}
       <section
         id="about"
-        className="relative z-10 grid-bg bg-[#e8e4de] border-t border-[#c8c4bc] px-12 py-20"
+        className="relative z-10 grid-bg bg-surface border-t border-border px-12 py-20"
       >
         <div className="mx-auto max-w-6xl">
           <div className="mb-12">

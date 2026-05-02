@@ -5,6 +5,8 @@ import { Physics, RigidBody, RapierRigidBody, CuboidCollider } from "@react-thre
 import * as THREE from "three";
 import { BallModel } from "./BallModel";
 
+const COLOR_BG = "#F5F5F5";
+
 
 // Armature → Bone (base) → Bone.001 → Bone.002 → Bone.003 → Bone.004 → Bone.005
 // All bones are stacked vertically (Y translations).
@@ -28,6 +30,15 @@ const BONE_FOLLOW: Record<string, number> = {
 
 // How fast the IK target smooths toward the cursor (0–1)
 const TARGET_SMOOTH = 0.08;
+// NDC Y below this → rest mode (tune this value, -1 = bottom edge)
+const REST_THRESHOLD_Y = -0.75;
+// World-space position the arm idles at in rest mode (slightly elevated)
+// Idle animation sequence: wait → wrist flick → look around → return
+const INACTIVITY_DELAY  = 2.0;
+const DEFAULT_TARGET    = new THREE.Vector3(-0.5, 0.1, 0.25);
+const IDLE_BLEND_SPEED  = 0.3; // ramp speed for idle in/out
+const IDLE_BASE_AMP     = 0.25; // how much the base sweeps in radians // default rest pose
+
 
 const BONE_CONFIG: Record<string, BoneConfig> = {
   // Base turntable
@@ -45,9 +56,9 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
   "endeffector": { axis: "z", min: -Infinity, max: Infinity },
 };
 
-function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3> }) {
+function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null> }) {
   const gltf = useGLTF("/robot2.glb");
-  const { scene, camera } = useThree();
+  const { scene, camera, size } = useThree();
   const glbCamApplied = useRef(false);
 
   const baseRef = useRef<THREE.Object3D | null>(null);
@@ -77,7 +88,7 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
   };
 
   useEffect(() => {
-    scene.background = new THREE.Color("#f0ede8");
+    scene.background = new THREE.Color(COLOR_BG);
 
     // ── GLB camera ──────────────────────────────────────────────────────────
     if (!glbCamApplied.current) {
@@ -199,14 +210,33 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
   }, [gltf, scene, camera]);
 
   useEffect(() => {
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
     const onMove = (e: MouseEvent) => {
-      mouseNDC.current.set(
-        (e.clientX / window.innerWidth) * 2 - 1,
-        -((e.clientY / window.innerHeight) * 2 - 1)
-      );
+      isMouseGone.current = false;
+      isInactive.current = false;
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => { isInactive.current = true; }, INACTIVITY_DELAY * 1000);
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      mouseNDC.current.set(x, y);
+    };
+    const onLeave = (e: MouseEvent) => {
+      if (e.relatedTarget === null) {
+        isMouseGone.current = true;
+        isInactive.current = false;
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+      }
     };
     window.addEventListener("mousemove", onMove);
-    return () => window.removeEventListener("mousemove", onMove);
+    window.addEventListener("mouseout", onLeave);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseout", onLeave);
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+    };
   }, []);
 
   // Reusable vectors
@@ -220,7 +250,7 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
   });
 
   // Smooth IK target that lags behind the cursor
-  const smoothTarget = useRef(new THREE.Vector3());
+  const smoothTarget = useRef(new THREE.Vector3(-0.2, 0.1, 0.15)); // init to default
   const smoothInitialized = useRef(false);
 
   // 1. Ground plane (horizontal, Y-up) at robot base height
@@ -230,7 +260,15 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
   const backPlane = useRef(new THREE.Plane());
   const groundY = useRef(0);
 
-  useFrame(() => {
+  const isRestMode  = useRef(true);
+  const isMouseGone = useRef(true);
+  const isInactive  = useRef(false);
+  const idleTime    = useRef(0);
+  const idleBlend   = useRef(0);
+  const wasIdle = useRef(true);
+  const frozenEEPos = useRef(new THREE.Vector3(-0.2, 0.1, 0.15));
+
+  useFrame((_, delta) => {
     const base = baseRef.current;
     const armJoints = armJointsRef.current;
     const ee = endEffectorRef.current;
@@ -245,7 +283,7 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
     // Back plane: camera-facing, 30cm behind the robot
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
-    const backPoint = v.basePos.clone().addScaledVector(camDir, 0.3);
+    const backPoint = v.basePos.clone().addScaledVector(camDir, 0.9);
     if (backPlane.current) backPlane.current.setFromNormalAndCoplanarPoint(camDir.clone().negate(), backPoint);
 
     // Raycast onto BOTH planes, pick nearest valid hit
@@ -270,11 +308,49 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
       return; // No valid hit
     }
 
-    // ── Clamp target to stay close behind the base (working volume) ─────────
+    // ── Rest mode: cursor too low OR mouse left viewport ────────────────────
+    const belowThreshold = mouseNDC.current.y < REST_THRESHOLD_Y;
+    const shouldRest = isMouseGone.current || belowThreshold;
+    if (shouldRest !== isRestMode.current) {
+      isRestMode.current = shouldRest;
+      if (containerRef.current) {
+        containerRef.current.style.cursor = shouldRest ? "auto" : "none";
+      }
+      if (crosshairRef.current) {
+        crosshairRef.current.style.opacity = "0";
+      }
+    }
+
+    const isIdle = isRestMode.current || isInactive.current;
+
+    // Capture EE position the moment idle starts
+    if (isIdle && !wasIdle.current) {
+      ee.getWorldPosition(frozenEEPos.current);
+    }
+    wasIdle.current = isIdle;
+
+    // Wrist spin during any idle state (before IK so solver keeps EE fixed)
+    // idleBlend ramps 0→1 on entry, 1→0 on exit for a smooth start/stop
+    // When mouse left viewport: lerp back to default. When inactive: use frozen EE pos.
+    if (isRestMode.current) {
+      smoothTarget.current.lerp(DEFAULT_TARGET, 0.03);
+    }
+
+    // ── Idle blend ramp ───────────────────────────────────────────────────
+    if (isIdle) {
+      idleBlend.current = Math.min(idleBlend.current + IDLE_BLEND_SPEED * delta, 1);
+      idleTime.current += delta;
+    } else {
+      idleBlend.current = Math.max(idleBlend.current - IDLE_BLEND_SPEED * delta, 0);
+    }
+
+    // (no working-volume clamp — let the arm reach its full extent toward the camera)
+
+    // ── Clamp target backward (away from camera) ────────────────────────────
     const maxBackDistance = 0.5;
-    const backDist = v.target.z - v.basePos.z;
+    const backDist = v.basePos.z - v.target.z;
     if (backDist > maxBackDistance) {
-      v.target.z = v.basePos.z + maxBackDistance;
+      v.target.z = v.basePos.z - maxBackDistance;
     }
 
     // ── Smooth the IK target (lag behind cursor) ────────────────────────────
@@ -282,8 +358,11 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
       smoothTarget.current.copy(v.target);
       smoothInitialized.current = true;
     }
-    smoothTarget.current.lerp(v.target, TARGET_SMOOTH);
-    const ikTarget = smoothTarget.current;
+    if (!isRestMode.current) {
+      smoothTarget.current.lerp(v.target, TARGET_SMOOTH);
+    }
+    // During idle: use frozen EE world pos as IK target so crosshair never moves
+    const ikTarget = isInactive.current ? frozenEEPos.current : smoothTarget.current;
 
     // ── PHASE 1: Full CCD solve to get goal angles ──────────────────────────
     // Save current rotations
@@ -302,6 +381,11 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
         localTarget.z - base.position.z
       );
       base.rotation[baseConfig.axis] = THREE.MathUtils.clamp(desired, baseConfig.min, baseConfig.max);
+      // Idle: nudge base slightly off-axis AFTER atan2 so CCD arm compensates
+      // EE world position is unaffected — CCD redistributes the offset to arm joints
+      if (idleBlend.current > 0) {
+        base.rotation[baseConfig.axis] += Math.sin(idleTime.current * 0.28) * IDLE_BASE_AMP * idleBlend.current;
+      }
       base.updateWorldMatrix(true, true);
     }
 
@@ -354,11 +438,13 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
       const cfg = boneConfigRef.current.get(joint);
       if (!cfg) return;
 
-      const speed = BONE_FOLLOW[joint.name] ?? 0.06;
+      // During idle: use faster lerp so joints snap to compensate wrist spin quickly
+      const speed = isInactive.current
+        ? Math.min((BONE_FOLLOW[joint.name] ?? 0.06) * 4, 1)
+        : (BONE_FOLLOW[joint.name] ?? 0.06);
       const current = savedAngles[idx];
       let goal = goalAngles[idx];
 
-      // Wrap difference to [-PI, PI] for shortest-path interpolation
       let diff = goal - current;
       diff = ((diff + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
       goal = current + diff;
@@ -373,6 +459,16 @@ function RobotScene({ eeWorldPos, baseWorldPos }: { eeWorldPos: React.RefObject<
     // ── Export end-effector position for the ball magnet ─────────────────────
     ee.getWorldPosition(eeWorldPos.current);
     baseWorldPos.current.copy(v.basePos);
+
+    // ── Crosshair: frozen during idle so it never drifts ──────────────────
+    if (crosshairRef.current) {
+      const projPos = isInactive.current ? frozenEEPos.current : eeWorldPos.current;
+      const proj = projPos.clone().project(camera);
+      const x = (proj.x + 1) / 2 * size.width;
+      const y = (-proj.y + 1) / 2 * size.height;
+      crosshairRef.current.style.transform = `translate(calc(${x}px - 50%), calc(${y}px - 50%))`;
+      crosshairRef.current.style.opacity = proj.z < 1 ? "1" : "0";
+    }
   });
 
   return (
@@ -532,6 +628,8 @@ export default function HeroRobot() {
   const eeWorldPos = useRef(new THREE.Vector3());
   const baseWorldPos = useRef(new THREE.Vector3());
   const mouseDown = useRef(false);
+  const crosshairRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const down = () => { mouseDown.current = true; };
@@ -545,7 +643,7 @@ export default function HeroRobot() {
   }, []);
 
   return (
-    <div style={{ width: "100%", height: "100%" }}>
+    <div ref={containerRef} className="w-full h-full cursor-none">
       <Canvas
         camera={{ position: [4, 3, 5], fov: 45, near: 0.1, far: 500 }}
         gl={{
@@ -556,9 +654,9 @@ export default function HeroRobot() {
         shadows
       >
         <Physics gravity={[0, -9.81, 0]}>
-          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} />
+          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} />
           {/* Grid floor */}
-          <gridHelper args={[10, 10, "#888888", "#d0d0d0"]} position={[0, 0, 0]} />
+          <gridHelper args={[10, 10, "#BBBBBB", "#DDDDDD"]} position={[0, 0, 0]} />
           {/* Ground collider – cut at back edge so balls roll off */}
           <CuboidCollider args={[5, 0.5, 2]} position={[0, -0.5, 1.5]} />
           <BallSpawner
@@ -567,6 +665,20 @@ export default function HeroRobot() {
           />
         </Physics>
       </Canvas>
+
+      {/* Crosshair at projected IK target */}
+      <div
+        ref={crosshairRef}
+        className="absolute top-0 left-0 pointer-events-none opacity-0 will-change-transform"
+      >
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <line x1="14" y1="0" x2="14" y2="10" stroke="#111111" strokeWidth="1.5" strokeLinecap="round" />
+          <line x1="14" y1="18" x2="14" y2="28" stroke="#111111" strokeWidth="1.5" strokeLinecap="round" />
+          <line x1="0" y1="14" x2="10" y2="14" stroke="#111111" strokeWidth="1.5" strokeLinecap="round" />
+          <line x1="18" y1="14" x2="28" y2="14" stroke="#111111" strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="14" cy="14" r="2.5" stroke="#111111" strokeWidth="1.5" />
+        </svg>
+      </div>
     </div>
   );
 }

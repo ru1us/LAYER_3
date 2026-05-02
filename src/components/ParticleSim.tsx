@@ -4,6 +4,9 @@ import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { DebugOverlay } from "./DebugOverlay";
 
+const COLOR_BG = "#F5F5F5";
+const COLOR_SURFACE = "#EBEBEB";
+
 // ── Constants ──────────────────────────────────────────────────────────────
 const BALL_COUNT = 200;
 const BALL_RADIUS = 30;           // physics collision radius (world units)
@@ -290,6 +293,30 @@ export default function ParticleSim() {
   const loadStartRef = useRef(0);
   const fpsRef       = useRef(0);
 
+  // ── Custom cursor dot ────────────────────────────────────────────────────
+  const dotRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const grow = () => { if (dotRef.current) dotRef.current.style.width = dotRef.current.style.height = '20px'; };
+    const onMove = (e: MouseEvent) => {
+      const d = dotRef.current; if (!d) return;
+      const r = section.getBoundingClientRect();
+      d.style.left = `${e.clientX - r.left}px`;
+      d.style.top  = `${e.clientY - r.top}px`;
+      d.classList.remove('hidden');
+      d.style.width = d.style.height = '13px';
+      clearTimeout(timer);
+      timer = setTimeout(grow, 120);
+    };
+    const onLeave = () => { if (dotRef.current) dotRef.current.classList.add('hidden'); };
+    section.addEventListener('mousemove', onMove);
+    section.addEventListener('mouseleave', onLeave);
+    return () => { section.removeEventListener('mousemove', onMove); section.removeEventListener('mouseleave', onLeave); clearTimeout(timer); };
+  }, []);
+
   const handleLoaded = useCallback(() => {
     setLoadTime(performance.now() - loadStartRef.current);
   }, []);
@@ -321,16 +348,22 @@ export default function ParticleSim() {
   return (
     <section
       ref={sectionRef}
-      className="relative z-10 bg-[#e8e4de] border-t border-[#c8c4bc]"
-      style={{ height: 640 }}
+      className="relative z-10 bg-surface border-t border-border h-[640px] cursor-none"
     >
+      {/* Custom cursor dot */}
+      <div
+        ref={dotRef}
+        className="absolute hidden size-5 rounded-full bg-[#111111] pointer-events-none z-30 transition-[width,height] duration-150 ease-in-out"
+        style={{ transform: 'translate(-50%, -50%)' }}
+      />
+
       {/* Label overlay */}
       <div className="absolute top-8 left-12 z-10 pointer-events-none">
-        <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#999990] mb-2">
+        <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#999999] mb-2">
           Interactive
         </p>
         <h2 className="font-doto text-4xl text-[#111111]">PARTICLE_SIM</h2>
-        <p className="font-mono text-[0.65rem] text-[#999990] mt-2 tracking-[0.1em]">
+        <p className="font-mono text-[0.65rem] text-[#999999] mt-2 tracking-[0.1em]">
           hover to repel
         </p>
       </div>
@@ -341,11 +374,11 @@ export default function ParticleSim() {
           orthographic
           camera={{ position: [0, 60, 500], zoom: 1.2, near: 1, far: 10000 }}
           gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.5 }}
-          style={{ width: "100%", height: "100%" }}
-          onCreated={({ camera, gl }) => { camera.lookAt(0, -30, 0); gl.setClearColor("#e8e4de"); }}
+          className="w-full h-full"
+          onCreated={({ camera, gl }) => { camera.lookAt(0, -30, 0); gl.setClearColor(COLOR_BG); }}
         >
-          <ambientLight intensity={0.35} />
-          <directionalLight position={[30, 120, 90]} intensity={1.6} color="#ffffff" castShadow={false} />
+          <ambientLight intensity={0.8} />
+          <directionalLight position={[30, 120, 90]} intensity={2.2} color="#f3ff71" castShadow={false} />
           <pointLight position={[-60, 90, 60]} intensity={1.0} color="#E8FF00" />
           <GLInfo onInfo={handleGpu} />
           <Suspense fallback={null}>
