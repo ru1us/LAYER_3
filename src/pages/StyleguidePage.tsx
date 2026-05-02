@@ -25,7 +25,7 @@ export default function StyleguidePage() {
       <section className="mb-16">
         <p className="section-label mb-6">Color Palette</p>
         <div className="panel-grid grid grid-cols-3">
-          {colors.map((c, i) => (
+          {colors.map((c) => (
             <div
               key={c.name}
               className="overflow-hidden bg-surface border border-border rounded-lg"
