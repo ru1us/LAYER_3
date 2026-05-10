@@ -5,7 +5,6 @@ import * as THREE from "three";
 import { DebugOverlay } from "./DebugOverlay";
 
 const COLOR_BG = "#F5F5F5";
-const COLOR_SURFACE = "#EBEBEB";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const BALL_COUNT = 200;
