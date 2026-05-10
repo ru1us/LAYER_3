@@ -124,6 +124,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
 
     // ── Apply roughness map texture to all materials ──────────────────────────
     const textureLoader = new THREE.TextureLoader();
+    const ROBOT_GROUND_CLIP = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     textureLoader.load("/metalroughness.png", (roughnessTexture) => {
       roughnessTexture.colorSpace = THREE.SRGBColorSpace;
       gltf.scene.traverse((obj) => {
@@ -134,8 +135,9 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
             if ("roughness" in mat) {
               (mat as any).roughnessMap = roughnessTexture;
               (mat as any).roughness = 1.0;
-              mat.needsUpdate = true;
             }
+            (mat as any).clippingPlanes = [ROBOT_GROUND_CLIP];
+            mat.needsUpdate = true;
           });
         }
       });
@@ -214,6 +216,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
     const onMove = (e: MouseEvent) => {
       isMouseGone.current = false;
       isInactive.current = false;
+      idleBlend.current = 0;
       if (inactivityTimer) clearTimeout(inactivityTimer);
       inactivityTimer = setTimeout(() => { isInactive.current = true; }, INACTIVITY_DELAY * 1000);
       const el = containerRef.current;
@@ -326,6 +329,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
     // Capture EE position the moment idle starts
     if (isIdle && !wasIdle.current) {
       ee.getWorldPosition(frozenEEPos.current);
+      idleTime.current = 0;
     }
     wasIdle.current = isIdle;
 
@@ -360,9 +364,19 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
     }
     if (!isRestMode.current) {
       smoothTarget.current.lerp(v.target, TARGET_SMOOTH);
+      // Clamp so the IK target never goes below the ground plane
+      smoothTarget.current.y = Math.max(smoothTarget.current.y, 0);
     }
     // During idle: use frozen EE world pos as IK target so crosshair never moves
     const ikTarget = isInactive.current ? frozenEEPos.current : smoothTarget.current;
+
+    // Lift the IK target slightly while the smooth target is still catching up.
+    // Applied to a separate vector so smoothTarget stays clean and comes back down naturally.
+    const lag = smoothTarget.current.distanceTo(v.target);
+    const lift = Math.min(lag * 0.3, 0.06);
+    const liftedIkTarget = lift > 0.001 && !isInactive.current
+      ? ikTarget.clone().setY(ikTarget.y + lift)
+      : ikTarget;
 
     // ── PHASE 1: Full CCD solve to get goal angles ──────────────────────────
     // Save current rotations
@@ -375,7 +389,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
     // Solve base first
     const baseConfig = boneConfigRef.current.get(base);
     if (base.parent && baseConfig) {
-      const localTarget = base.parent.worldToLocal(ikTarget.clone());
+      const localTarget = base.parent.worldToLocal(liftedIkTarget.clone());
       const desired = Math.atan2(
         localTarget.x - base.position.x,
         localTarget.z - base.position.z
@@ -399,7 +413,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
         ee.getWorldPosition(v.eePos);
         joint.getWorldPosition(v.jointPos);
         v.toEE.copy(v.eePos).sub(v.jointPos);
-        v.toTarget.copy(ikTarget).sub(v.jointPos);
+        v.toTarget.copy(liftedIkTarget).sub(v.jointPos);
 
         if (v.toEE.lengthSq() < 1e-8 || v.toTarget.lengthSq() < 1e-8) continue;
 
@@ -485,12 +499,28 @@ const BALL_RADIUS = 0.04;
 const MAGNET_RANGE = 0.2;
 const SPAWN_RANGE_X = 0.4;
 const SPAWN_RANGE_Z = 0.4;
+const HOLE_RADIUS = 0.052; // just slightly wider than BALL_RADIUS so it's a snug fit
 
 function randomSkySpawn(): [number, number, number] {
   const x = (Math.random() - 0.5) * SPAWN_RANGE_X * 2;
   const y = 2.5 + Math.random() * 0.5;
   const z = (Math.random() - 0.5) * SPAWN_RANGE_Z * 2;
   return [x, y, z];
+}
+
+function randomHolePos(): THREE.Vector3 {
+  const x = (Math.random() - 0.5) * 0.7;
+  const z = 0.15 + Math.random() * 0.5;
+  return new THREE.Vector3(x, 0, z);
+}
+
+function HoleMarker({ position }: { position: THREE.Vector3 }) {
+  return (
+    <mesh position={[position.x, 0.002, position.z]} rotation={[-Math.PI / 2, 0, 0]}>
+      <circleGeometry args={[HOLE_RADIUS, 48]} />
+      <meshBasicMaterial color="black" />
+    </mesh>
+  );
 }
 
 const MAX_BALLS = 6;
@@ -500,11 +530,15 @@ function InteractiveBall({
   mouseDown,
   isActive,
   onOffscreen,
+  holePosRef,
+  onScored,
 }: {
   eeWorldPos: React.RefObject<THREE.Vector3>;
   mouseDown: React.RefObject<boolean>;
   isActive: boolean;
   onOffscreen: () => void;
+  holePosRef: React.RefObject<THREE.Vector3>;
+  onScored: () => void;
 }) {
   const rigidRef = useRef<RapierRigidBody>(null);
   const wasHeld = useRef(false);
@@ -513,10 +547,26 @@ function InteractiveBall({
   const initPos = useRef<[number, number, number]>(randomSkySpawn());
   const spawnTime = useRef(performance.now());
   const offscreenFired = useRef(false);
+  // Sinking animation: set when ball enters hole, null otherwise
+  const sinking = useRef<{ hx: number; hz: number } | null>(null);
+  const scoreFired = useRef(false);
 
-  useFrame(({ camera }) => {
+  useFrame(({ camera }, delta) => {
     const rb = rigidRef.current;
     if (!rb) return;
+
+    // ── Sinking animation: ball fell into hole ───────────────────────────
+    if (sinking.current) {
+      const { hx, hz } = sinking.current;
+      const cur = rb.translation();
+      const newY = cur.y - delta * 1.8;
+      rb.setNextKinematicTranslation({ x: hx, y: newY, z: hz });
+      if (newY < -0.25 && !scoreFired.current) {
+        scoreFired.current = true;
+        onScored();
+      }
+      return;
+    }
 
     const pos = rb.translation();
     const ballPos = new THREE.Vector3(pos.x, pos.y, pos.z);
@@ -529,6 +579,25 @@ function InteractiveBall({
         if (Math.abs(ndc.x) > 1.1 || Math.abs(ndc.y) > 1.1) {
           offscreenFired.current = true;
           onOffscreen();
+          return;
+        }
+      }
+    }
+
+    // ── Hole suction + detection (only when ball is free) ────────────────
+    if (isActive && !offscreenFired.current && !isHeld.current) {
+      const hole = holePosRef.current;
+      if (hole && ballPos.y < BALL_RADIUS * 3) {
+        const dx = ballPos.x - hole.x;
+        const dz = ballPos.z - hole.z;
+        const dxz = Math.sqrt(dx * dx + dz * dz);
+
+        if (dxz < HOLE_RADIUS) {
+          // Ball is over the hole — make kinematic so physics can't fight the sink
+          offscreenFired.current = true;
+          rb.setBodyType(2, true); // 2 = KinematicPositionBased
+          rb.setNextKinematicTranslation({ x: hole.x, y: ballPos.y, z: hole.z });
+          sinking.current = { hx: hole.x, hz: hole.z };
           return;
         }
       }
@@ -598,6 +667,17 @@ function BallSpawner({
   const [firstId] = useState(() => Date.now());
   const [balls, setBalls] = useState<number[]>([firstId]);
   const [activeId, setActiveId] = useState<number>(firstId);
+  const [holePos, setHolePos] = useState(() => randomHolePos());
+  const holePosRef = useRef(holePos);
+
+  const spawnNewBall = useCallback(() => {
+    const newId = Date.now() + Math.random();
+    setBalls(prev => {
+      const next = [...prev, newId];
+      return next.length > MAX_BALLS ? next.slice(next.length - MAX_BALLS) : next;
+    });
+    setActiveId(newId);
+  }, []);
 
   const handleOffscreen = useCallback((id: number) => {
     const newId = Date.now() + Math.random();
@@ -609,13 +689,23 @@ function BallSpawner({
     setActiveId(newId);
   }, []);
 
+  const handleScored = useCallback(() => {
+    const newHole = randomHolePos();
+    holePosRef.current = newHole;
+    setHolePos(newHole);
+    spawnNewBall();
+  }, [spawnNewBall]);
+
   return (
     <>
+      <HoleMarker position={holePos} />
       {balls.map(id => (
         <InteractiveBall
           key={id}
           isActive={id === activeId}
           onOffscreen={() => handleOffscreen(id)}
+          onScored={handleScored}
+          holePosRef={holePosRef}
           eeWorldPos={eeWorldPos}
           mouseDown={mouseDown}
         />
@@ -650,6 +740,7 @@ export default function HeroRobot() {
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: .8,
+          localClippingEnabled: true,
         }}
         shadows
       >
