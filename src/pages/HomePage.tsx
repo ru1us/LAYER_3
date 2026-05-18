@@ -1,19 +1,75 @@
 import { useRef, Suspense } from "react";
+import { Link } from "react-router-dom";
 import HeroRobot from "../components/HeroRobot.tsx";
 import ParticleSim from "../components/ParticleSim.tsx";
+import FishSim from "../components/FishSim.tsx";
+
+// ── Reusable folder-tab box ────────────────────────────────────────────────
+function AlgoBox({
+  tag,
+  title,
+  left,
+  right,
+  linkTo,
+}: {
+  tag: string;
+  title: string;
+  left: React.ReactNode;
+  right: React.ReactNode;
+  linkTo: string;
+}) {
+  return (
+    <section className="relative z-10 bg-surface border-t border-border px-12 py-16">
+      <div className="mx-auto max-w-6xl">
+        <div className="relative border-x border-b border-border">
+          {/* Folder tab */}
+          <div className="flex items-end">
+            <div className="border border-b-0 border-border bg-surface flex items-center gap-3 px-5 py-2 shrink-0">
+              <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">
+                {tag}
+              </span>
+              <span className="font-doto text-sm text-text">{title}</span>
+            </div>
+            <div className="flex-1 border-t border-border" />
+          </div>
+
+          {/* Two-column content */}
+          <div className="grid md:grid-cols-2">
+            <div className="border-r border-border p-10">{left}</div>
+            <div className="p-10">{right}</div>
+          </div>
+
+          {/* Footer link */}
+          <div className="border-t border-border px-10 py-4 flex items-center justify-between">
+            <span className="font-mono text-[0.6rem] text-text-muted uppercase tracking-[0.18em]">
+              Three.js · React Three Fiber
+            </span>
+            <Link
+              to={linkTo}
+              className="font-mono text-[0.7rem] uppercase tracking-[0.18em] text-text hover:text-text-muted transition-colors flex items-center gap-2"
+            >
+              View Implementation
+              <span className="font-mono">→</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function HomePage() {
   const heroRef = useRef<HTMLDivElement>(null);
 
   return (
     <div>
-      {/* ── Hero Section ─────────────────────── */}
+      {/* ── Hero (CCD Robot) ─────────────────── */}
       <section ref={heroRef} className="relative h-screen">
         <div className="sticky top-0 h-screen w-full">
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center bg-bg">
-                <div className="font-mono text-[0.7rem] tracking-caps uppercase text-[#777777]">
+                <div className="font-mono text-[0.7rem] tracking-caps uppercase text-text-muted">
                   Loading...
                 </div>
               </div>
@@ -22,16 +78,13 @@ export default function HomePage() {
             <HeroRobot />
           </Suspense>
 
-          {/* ── Hero HUD overlay ──────────────── */}
           <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none p-16">
             <div className="flex items-end gap-16">
               <div>
                 <p className="section-label mb-4">Inverse Kinematics</p>
-                <h1 className="font-doto text-8xl">
-                  LAYER_3
-                </h1>
-                <p className="font-mono text-body text-text-muted mt-4 max-w-[480px]">
-                  Interactive 3D- Visualization of robotic systems and inverse kinematics.  
+                <h1 className="font-doto text-8xl">LAYER_3</h1>
+                <p className="font-mono text-body text-text-muted mt-4 max-w-120">
+                  Two algorithms. Two simulations. One problem — making joints reach a target.
                 </p>
               </div>
             </div>
@@ -39,61 +92,173 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── Projects Section ─────────────────── */}
-      <section
-        id="projekte"
-        className="relative z-10 grid-bg bg-surface px-12 py-20"
-      >
-        <div className="mx-auto max-w-6xl">
-          <div className="mb-12">
-            <p className="section-label mb-3">Projects</p>
-            <h2 className="text-heading">
-              Projects
-            </h2>
-            <p className="font-mono text-body text-text-muted mt-3 max-w-[500px]">
-              Each project showcases an interactive 3D scene exploring renewable energy and robotics. Click a project to explore it in detail.
+      {/* ── CCD Explanation ──────────────────── */}
+      <AlgoBox
+        tag="Algorithm 01"
+        title="CCD_IK"
+        linkTo="/pages/ccd"
+        left={
+          <>
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              What is Inverse Kinematics?
             </p>
-          </div>
-        </div>
-      </section>
+            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted mb-6">
+              A robotic arm has joints. If you set each joint angle manually and calculate
+              where the tip ends up — that's <span className="text-text">forward kinematics</span>.{" "}
+              <span className="text-text">Inverse kinematics</span> is the reverse: you define
+              where the tip should be, and the algorithm figures out the joint angles.
+            </p>
+            <div className="h-px bg-border mb-6" />
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              Cyclic Coordinate Descent
+            </p>
+            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted">
+              CCD solves IK <span className="text-text">iteratively</span>. Starting from the
+              joint nearest the end-effector, each joint rotates by the minimum angle needed to
+              bring the tip closer to the target. The cycle repeats from tip to base until the
+              chain converges — typically in 6–8 passes per frame.
+            </p>
+          </>
+        }
+        right={
+          <>
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              One Iteration — Step by Step
+            </p>
+            <div className="space-y-0 border border-border mb-8">
+              {[
+                ["01", "Pick the joint closest to the end-effector"],
+                ["02", "Compute the angle between EE → joint and target → joint"],
+                ["03", "Rotate the joint by that delta, clamped to joint limits"],
+                ["04", "Update world matrices and move to the next joint (toward base)"],
+                ["05", "Repeat the full cycle N times until error is below threshold"],
+              ].map(([n, text]) => (
+                <div key={n} className="flex gap-4 px-4 py-3 border-b border-border last:border-b-0">
+                  <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
+                  <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-0 border border-border">
+              {[
+                { k: "Joints", v: "6" },
+                { k: "Iterations / frame", v: "8" },
+                { k: "Lerp smoothing", v: "0.035 – 0.095" },
+              ].map(({ k, v }, i) => (
+                <div
+                  key={k}
+                  className={`flex justify-between px-4 py-2 font-mono text-[0.72rem] ${i % 2 === 0 ? "bg-[#f0f0f0]" : ""}`}
+                >
+                  <span className="text-text-muted">{k}</span>
+                  <span className="text-text">{v}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        }
+      />
 
-      {/* ── Particle Sim Section ─────────────── */}
+      {/* ── Fish (FABRIK) ────────────────────── */}
+      <FishSim />
+
+      {/* ── FABRIK Explanation ───────────────── */}
+      <AlgoBox
+        tag="Algorithm 02"
+        title="FABRIK"
+        linkTo="/pages/fabrik"
+        left={
+          <>
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              A different approach
+            </p>
+            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted mb-6">
+              CCD works with <span className="text-text">angles</span>. FABRIK works with{" "}
+              <span className="text-text">positions</span>. Instead of rotating joints, it
+              repositions them — dragging the chain toward the target without ever computing
+              a rotation matrix.
+            </p>
+            <div className="h-px bg-border mb-6" />
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              Forward And Backward Reaching IK
+            </p>
+            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted">
+              FABRIK uses two passes. The <span className="text-text">forward pass</span> pulls
+              the tip to the target and drags each joint behind it. The{" "}
+              <span className="text-text">backward pass</span> re-anchors the base and adjusts
+              the chain back forward. The result is fast, stable, and produces naturally
+              flowing curves — ideal for organic chains like a fish spine.
+            </p>
+          </>
+        }
+        right={
+          <>
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              One Iteration — Step by Step
+            </p>
+            <div className="space-y-0 border border-border mb-8">
+              {[
+                ["01", "Move joint[0] (head) to the target position"],
+                ["02", "For each next joint: maintain segment length, drag direction constrained"],
+                ["03", "Apply max-bend angle constraint to prevent snake-like folding"],
+                ["04", "Result: a smooth curve from head to tail following the target"],
+              ].map(([n, text]) => (
+                <div key={n} className="flex gap-4 px-4 py-3 border-b border-border last:border-b-0">
+                  <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
+                  <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-0 border border-border">
+              {[
+                { k: "Chain joints", v: "6 (spine)" },
+                { k: "Pass direction", v: "Forward only" },
+                { k: "Max bend / segment", v: "45°" },
+              ].map(({ k, v }, i) => (
+                <div
+                  key={k}
+                  className={`flex justify-between px-4 py-2 font-mono text-[0.72rem] ${i % 2 === 0 ? "bg-[#f0f0f0]" : ""}`}
+                >
+                  <span className="text-text-muted">{k}</span>
+                  <span className="text-text">{v}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        }
+      />
+
+      {/* ── Particle Sim (Bonus) ─────────────── */}
       <ParticleSim />
 
-      
-      {/* ── About / Tech Section ─────────────── */}
+      {/* ── Tech stack ───────────────────────── */}
       <section
         id="about"
-        className="relative z-10 grid-bg bg-surface border-t border-border px-12 py-20"
+        className="relative z-10 bg-surface border-t border-border px-12 py-16"
       >
         <div className="mx-auto max-w-6xl">
-          <div className="mb-12">
-            <p className="section-label mb-3">Technology</p>
-            <h2 className="text-heading">
-              Built with modern web stack
-            </h2>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-3">
-            {[
-              {
-                name: "Three.js",
-                text: "The leading JavaScript library for 3D graphics in the browser, based on WebGL.",
-              },
-              {
-                name: "React Three Fiber",
-                text: "A React renderer for Three.js. Scenes are written declaratively as components.",
-              },
-              {
-                name: "Drei",
-                text: "Ready-made helpers — OrbitControls, Environments, Loader, and many more utilities.",
-              },
-            ].map((card) => (
-              <div key={card.name} className="space-y-3">
-                <h3 className="font-doto font-bold text-body mb-0">{card.name}</h3>
-                <p className="font-mono text-small text-text-muted">{card.text}</p>
+          <div className="relative border-x border-b border-border">
+            <div className="flex items-end">
+              <div className="border border-b-0 border-border bg-surface flex items-center gap-3 px-5 py-2 shrink-0">
+                <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">Stack</span>
+                <span className="font-doto text-sm text-text">BUILT_WITH</span>
               </div>
-            ))}
+              <div className="flex-1 border-t border-border" />
+            </div>
+            <div className="grid md:grid-cols-3">
+              {[
+                { name: "Three.js", text: "WebGL 3D engine. Manages scenes, cameras, geometry, materials and the render loop." },
+                { name: "React Three Fiber", text: "Declarative React renderer for Three.js. Components map directly to Three.js objects." },
+                { name: "Drei", text: "Utility library for R3F — loaders, controls, helpers, physics abstractions." },
+              ].map(({ name, text }, i) => (
+                <div
+                  key={name}
+                  className={`p-8 ${i < 2 ? "border-r border-border" : ""}`}
+                >
+                  <h3 className="font-doto text-[0.9rem] mb-3">{name}</h3>
+                  <p className="font-mono text-[0.72rem] leading-relaxed text-text-muted">{text}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>

@@ -72,17 +72,10 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
   const setupBoneConfig = () => {
     const chain = [baseRef.current, ...armJointsRef.current, endEffectorRef.current].filter(Boolean);
     const configMap = new Map<THREE.Object3D, BoneConfig>();
-    
     for (const bone of chain) {
       if (!bone) continue;
       const config = BONE_CONFIG[bone.name];
-      if (config) {
-        configMap.set(bone, config);
-        console.log(`[Robot] Config for "${bone.name}": axis=${config.axis}, limits=[${config.min.toFixed(2)}, ${config.max.toFixed(2)}]`);
-      } else {
-        console.warn(`[Robot] No config for "${bone.name}" — add to BONE_CONFIG or using default z-axis`);
-        configMap.set(bone, { axis: "z", min: -Infinity, max: Infinity });
-      }
+      configMap.set(bone, config ?? { axis: "z", min: -Infinity, max: Infinity });
     }
     boneConfigRef.current = configMap;
   };
@@ -141,29 +134,11 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
           });
         }
       });
-      console.log("[Robot] Roughness map applied to all materials");
     });
 
-    // ── Print hierarchy for debugging ───────────────────────────────────────
-    console.groupCollapsed("[Robot] Scene hierarchy");
-    const printTree = (obj: THREE.Object3D, depth = 0) => {
-      const p = new THREE.Vector3();
-      obj.getWorldPosition(p);
-      console.log(
-        "  ".repeat(depth) +
-          `${obj.type.padEnd(20)} "${obj.name}" (${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)})`
-      );
-      obj.children.forEach((ch) => printTree(ch, depth + 1));
-    };
-    printTree(gltf.scene);
-    console.groupEnd();
-
+    // ── Find bone chain ──────────────────────────────────────────────────────
     const nameMap = new Map<string, THREE.Object3D>();
-    gltf.scene.traverse((obj) => {
-      if (obj.name) nameMap.set(obj.name, obj);
-    });
-
-    console.log("[Robot] All node names:", [...nameMap.keys()]);
+    gltf.scene.traverse((obj) => { if (obj.name) nameMap.set(obj.name, obj); });
 
     // Find the base bone — try common name variants
     let base: THREE.Object3D | null = null;
@@ -195,20 +170,12 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
       // First bone = base turntable, middle bones = IK joints, last = end-effector
       if (chain.length >= 3) {
         baseRef.current = chain[0];
-        armJointsRef.current = chain.slice(1, -1); // everything between base and tip
-        
-        // Try to find explicit endeffector object
+        armJointsRef.current = chain.slice(1, -1);
         const ee = nameMap.get("endeffector");
         endEffectorRef.current = ee || chain[chain.length - 1];
-
-        // Update config on initial setup
         setTimeout(() => setupBoneConfig(), 0);
       }
     }
-
-    console.log("[Robot] Base:", baseRef.current?.name);
-    console.log("[Robot] Arm joints:", armJointsRef.current.map((j) => j.name));
-    console.log("[Robot] End-effector:", endEffectorRef.current?.name);
   }, [gltf, scene, camera]);
 
   useEffect(() => {
@@ -252,6 +219,30 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
     basePos: new THREE.Vector3(),
   });
 
+  // Pre-allocated CCD scratch objects – avoids 48+ allocs/frame in the solver loop
+  const _ccd = useRef({
+    axisLocal:  new THREE.Vector3(),
+    axisWorld:  new THREE.Vector3(),
+    worldQuat:  new THREE.Quaternion(),
+    eeProj:     new THREE.Vector3(),
+    targetProj: new THREE.Vector3(),
+    cross:      new THREE.Vector3(),
+  });
+
+  // Pre-allocated per-frame ray/plane helpers
+  const _ray = useRef({
+    hitGround:      new THREE.Vector3(),
+    hitBack:        new THREE.Vector3(),
+    camDir:         new THREE.Vector3(),
+    backPoint:      new THREE.Vector3(),
+    liftedIkTarget: new THREE.Vector3(),
+  });
+
+  // Cached joint list + angle arrays (avoids spread + new Array each frame)
+  const _allJoints    = useRef<THREE.Object3D[]>([]);
+  const _savedAngles  = useRef<number[]>([]);
+  const _goalAngles   = useRef<number[]>([]);
+
   // Smooth IK target that lags behind the cursor
   const smoothTarget = useRef(new THREE.Vector3(-0.2, 0.1, 0.15)); // init to default
   const smoothInitialized = useRef(false);
@@ -277,70 +268,67 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
     const ee = endEffectorRef.current;
     if (!base || armJoints.length === 0 || !ee) return;
 
-    const v = _v.current;
+    const v   = _v.current;
+    const ccd = _ccd.current;
+    const ray = _ray.current;
+
+    // ── Ensure cached joint list is up to date ─────────────────────────────
+    if (_allJoints.current.length !== armJoints.length + 1) {
+      _allJoints.current = [base, ...armJoints];
+      _savedAngles.current = new Array(_allJoints.current.length).fill(0);
+      _goalAngles.current  = new Array(_allJoints.current.length).fill(0);
+    }
+    const allJoints = _allJoints.current;
 
     base.getWorldPosition(v.basePos);
     groundY.current = v.basePos.y;
-    // Ground plane raised by ball radius so grabbed ball sits on the surface
     groundPlane.current.set(new THREE.Vector3(0, 1, 0), -BALL_RADIUS);
-    // Back plane: camera-facing, 30cm behind the robot
-    const camDir = new THREE.Vector3();
-    camera.getWorldDirection(camDir);
-    const backPoint = v.basePos.clone().addScaledVector(camDir, 0.9);
-    if (backPlane.current) backPlane.current.setFromNormalAndCoplanarPoint(camDir.clone().negate(), backPoint);
 
-    // Raycast onto BOTH planes, pick nearest valid hit
+    // Back plane – reuse pre-allocated vectors
+    camera.getWorldDirection(ray.camDir);
+    ray.backPoint.copy(v.basePos).addScaledVector(ray.camDir, 0.9);
+    backPlane.current.setFromNormalAndCoplanarPoint(
+      ray.camDir.clone().negate(),
+      ray.backPoint,
+    );
+
     raycaster.current.setFromCamera(mouseNDC.current, camera);
-    const ray = raycaster.current.ray;
+    const r = raycaster.current.ray;
 
-    const hitGround = new THREE.Vector3();
-    const hitBack = new THREE.Vector3();
-    const gotGround = ray.intersectPlane(groundPlane.current, hitGround);
-    const gotBack = ray.intersectPlane(backPlane.current, hitBack);
+    const gotGround = r.intersectPlane(groundPlane.current, ray.hitGround);
+    const gotBack   = r.intersectPlane(backPlane.current,   ray.hitBack);
 
     if (gotGround && gotBack) {
-      // Pick the one closer to the camera
-      const dG = hitGround.distanceToSquared(ray.origin);
-      const dB = hitBack.distanceToSquared(ray.origin);
-      v.target.copy(dG < dB ? hitGround : hitBack);
+      const dG = ray.hitGround.distanceToSquared(r.origin);
+      const dB = ray.hitBack.distanceToSquared(r.origin);
+      v.target.copy(dG < dB ? ray.hitGround : ray.hitBack);
     } else if (gotGround) {
-      v.target.copy(hitGround);
+      v.target.copy(ray.hitGround);
     } else if (gotBack) {
-      v.target.copy(hitBack);
+      v.target.copy(ray.hitBack);
     } else {
-      return; // No valid hit
+      return;
     }
 
-    // ── Rest mode: cursor too low OR mouse left viewport ────────────────────
+    // ── Rest mode ───────────────────────────────────────────────────────────
     const belowThreshold = mouseNDC.current.y < REST_THRESHOLD_Y;
     const shouldRest = isMouseGone.current || belowThreshold;
     if (shouldRest !== isRestMode.current) {
       isRestMode.current = shouldRest;
-      if (containerRef.current) {
-        containerRef.current.style.cursor = shouldRest ? "auto" : "none";
-      }
-      if (crosshairRef.current) {
-        crosshairRef.current.style.opacity = "0";
-      }
+      if (containerRef.current) containerRef.current.style.cursor = shouldRest ? "auto" : "none";
+      if (crosshairRef.current)  crosshairRef.current.style.opacity = "0";
     }
 
     const isIdle = isRestMode.current || isInactive.current;
 
-    // Capture EE position the moment idle starts
     if (isIdle && !wasIdle.current) {
       ee.getWorldPosition(frozenEEPos.current);
       idleTime.current = 0;
     }
     wasIdle.current = isIdle;
 
-    // Wrist spin during any idle state (before IK so solver keeps EE fixed)
-    // idleBlend ramps 0→1 on entry, 1→0 on exit for a smooth start/stop
-    // When mouse left viewport: lerp back to default. When inactive: use frozen EE pos.
-    if (isRestMode.current) {
-      smoothTarget.current.lerp(DEFAULT_TARGET, 0.03);
-    }
+    if (isRestMode.current) smoothTarget.current.lerp(DEFAULT_TARGET, 0.03);
 
-    // ── Idle blend ramp ───────────────────────────────────────────────────
     if (isIdle) {
       idleBlend.current = Math.min(idleBlend.current + IDLE_BLEND_SPEED * delta, 1);
       idleTime.current += delta;
@@ -348,65 +336,49 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
       idleBlend.current = Math.max(idleBlend.current - IDLE_BLEND_SPEED * delta, 0);
     }
 
-    // (no working-volume clamp — let the arm reach its full extent toward the camera)
-
-    // ── Clamp target backward (away from camera) ────────────────────────────
     const maxBackDistance = 0.5;
-    const backDist = v.basePos.z - v.target.z;
-    if (backDist > maxBackDistance) {
-      v.target.z = v.basePos.z - maxBackDistance;
-    }
+    if (v.basePos.z - v.target.z > maxBackDistance) v.target.z = v.basePos.z - maxBackDistance;
 
-    // ── Smooth the IK target (lag behind cursor) ────────────────────────────
-    if (!smoothInitialized.current) {
-      smoothTarget.current.copy(v.target);
-      smoothInitialized.current = true;
-    }
+    if (!smoothInitialized.current) { smoothTarget.current.copy(v.target); smoothInitialized.current = true; }
     if (!isRestMode.current) {
       smoothTarget.current.lerp(v.target, TARGET_SMOOTH);
-      // Clamp so the IK target never goes below the ground plane
       smoothTarget.current.y = Math.max(smoothTarget.current.y, 0);
     }
-    // During idle: use frozen EE world pos as IK target so crosshair never moves
+
     const ikTarget = isInactive.current ? frozenEEPos.current : smoothTarget.current;
 
-    // Lift the IK target slightly while the smooth target is still catching up.
-    // Applied to a separate vector so smoothTarget stays clean and comes back down naturally.
-    const lag = smoothTarget.current.distanceTo(v.target);
+    // Lift – reuse pre-alloc liftedIkTarget vector
+    const lag  = smoothTarget.current.distanceTo(v.target);
     const lift = Math.min(lag * 0.3, 0.06);
-    const liftedIkTarget = lift > 0.001 && !isInactive.current
-      ? ikTarget.clone().setY(ikTarget.y + lift)
-      : ikTarget;
+    if (lift > 0.001 && !isInactive.current) {
+      ray.liftedIkTarget.copy(ikTarget).setY(ikTarget.y + lift);
+    } else {
+      ray.liftedIkTarget.copy(ikTarget);
+    }
+    const liftedIkTarget = ray.liftedIkTarget;
 
-    // ── PHASE 1: Full CCD solve to get goal angles ──────────────────────────
-    // Save current rotations
-    const allJoints = [base, ...armJoints];
-    const savedAngles: number[] = allJoints.map((j) => {
-      const cfg = boneConfigRef.current.get(j);
-      return cfg ? j.rotation[cfg.axis] : 0;
-    });
+    // ── PHASE 1: Save current angles ───────────────────────────────────────
+    for (let i = 0; i < allJoints.length; i++) {
+      const cfg = boneConfigRef.current.get(allJoints[i]);
+      _savedAngles.current[i] = cfg ? allJoints[i].rotation[cfg.axis] : 0;
+    }
 
-    // Solve base first
+    // Solve base
     const baseConfig = boneConfigRef.current.get(base);
     if (base.parent && baseConfig) {
       const localTarget = base.parent.worldToLocal(liftedIkTarget.clone());
-      const desired = Math.atan2(
-        localTarget.x - base.position.x,
-        localTarget.z - base.position.z
-      );
+      const desired = Math.atan2(localTarget.x - base.position.x, localTarget.z - base.position.z);
       base.rotation[baseConfig.axis] = THREE.MathUtils.clamp(desired, baseConfig.min, baseConfig.max);
-      // Idle: nudge base slightly off-axis AFTER atan2 so CCD arm compensates
-      // EE world position is unaffected — CCD redistributes the offset to arm joints
       if (idleBlend.current > 0) {
         base.rotation[baseConfig.axis] += Math.sin(idleTime.current * 0.28) * IDLE_BASE_AMP * idleBlend.current;
       }
       base.updateWorldMatrix(true, true);
     }
 
-    // Full CCD (8 iterations for convergence)
+    // Full CCD (8 iterations) – zero heap allocations
     for (let iter = 0; iter < 8; iter++) {
       for (let i = armJoints.length - 1; i >= 0; i--) {
-        const joint = armJoints[i];
+        const joint  = armJoints[i];
         const config = boneConfigRef.current.get(joint);
         if (!config) continue;
 
@@ -414,67 +386,67 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
         joint.getWorldPosition(v.jointPos);
         v.toEE.copy(v.eePos).sub(v.jointPos);
         v.toTarget.copy(liftedIkTarget).sub(v.jointPos);
-
         if (v.toEE.lengthSq() < 1e-8 || v.toTarget.lengthSq() < 1e-8) continue;
 
-        const axisLocal = new THREE.Vector3(
+        // Axis in world space – reuse ccd.axisLocal + ccd.worldQuat
+        ccd.axisLocal.set(
           config.axis === "x" ? 1 : 0,
           config.axis === "y" ? 1 : 0,
-          config.axis === "z" ? 1 : 0
+          config.axis === "z" ? 1 : 0,
         );
-        const worldQuat = joint.getWorldQuaternion(new THREE.Quaternion());
-        const axisWorld = axisLocal.applyQuaternion(worldQuat).normalize();
+        joint.getWorldQuaternion(ccd.worldQuat);
+        ccd.axisWorld.copy(ccd.axisLocal).applyQuaternion(ccd.worldQuat).normalize();
 
-        const eeProj = v.toEE.clone().projectOnPlane(axisWorld);
-        const targetProj = v.toTarget.clone().projectOnPlane(axisWorld);
-        if (eeProj.lengthSq() < 1e-8 || targetProj.lengthSq() < 1e-8) continue;
-        eeProj.normalize();
-        targetProj.normalize();
+        // Project onto constraint plane – reuse ccd.eeProj + ccd.targetProj
+        ccd.eeProj.copy(v.toEE).projectOnPlane(ccd.axisWorld);
+        ccd.targetProj.copy(v.toTarget).projectOnPlane(ccd.axisWorld);
+        if (ccd.eeProj.lengthSq() < 1e-8 || ccd.targetProj.lengthSq() < 1e-8) continue;
+        ccd.eeProj.normalize();
+        ccd.targetProj.normalize();
 
-        let angle = Math.acos(THREE.MathUtils.clamp(eeProj.dot(targetProj), -1, 1));
-        const cross = eeProj.clone().cross(targetProj);
-        if (cross.dot(axisWorld) < 0) angle = -angle;
+        let angle = Math.acos(THREE.MathUtils.clamp(ccd.eeProj.dot(ccd.targetProj), -1, 1));
+        ccd.cross.crossVectors(ccd.eeProj, ccd.targetProj);
+        if (ccd.cross.dot(ccd.axisWorld) < 0) angle = -angle;
 
-        const newAngle = joint.rotation[config.axis] + angle;
-        joint.rotation[config.axis] = THREE.MathUtils.clamp(newAngle, config.min, config.max);
+        joint.rotation[config.axis] = THREE.MathUtils.clamp(
+          joint.rotation[config.axis] + angle, config.min, config.max,
+        );
         joint.updateWorldMatrix(true, true);
       }
     }
 
     // Read goal angles
-    const goalAngles: number[] = allJoints.map((j) => {
-      const cfg = boneConfigRef.current.get(j);
-      return cfg ? j.rotation[cfg.axis] : 0;
-    });
+    for (let i = 0; i < allJoints.length; i++) {
+      const cfg = boneConfigRef.current.get(allJoints[i]);
+      _goalAngles.current[i] = cfg ? allJoints[i].rotation[cfg.axis] : 0;
+    }
 
-    // ── PHASE 2: Restore saved angles and lerp toward goals ─────────────────
-    allJoints.forEach((joint, idx) => {
-      const cfg = boneConfigRef.current.get(joint);
-      if (!cfg) return;
+    // ── PHASE 2: Restore + lerp ────────────────────────────────────────────
+    for (let idx = 0; idx < allJoints.length; idx++) {
+      const joint = allJoints[idx];
+      const cfg   = boneConfigRef.current.get(joint);
+      if (!cfg) continue;
 
-      // During idle: use faster lerp so joints snap to compensate wrist spin quickly
-      const speed = isInactive.current
+      const speed   = isInactive.current
         ? Math.min((BONE_FOLLOW[joint.name] ?? 0.06) * 4, 1)
         : (BONE_FOLLOW[joint.name] ?? 0.06);
-      const current = savedAngles[idx];
-      let goal = goalAngles[idx];
+      const current = _savedAngles.current[idx];
+      let goal      = _goalAngles.current[idx];
 
       let diff = goal - current;
       diff = ((diff + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
       goal = current + diff;
 
-      const lerped = THREE.MathUtils.lerp(current, goal, speed);
-      joint.rotation[cfg.axis] = THREE.MathUtils.clamp(lerped, cfg.min, cfg.max);
-    });
+      joint.rotation[cfg.axis] = THREE.MathUtils.clamp(
+        THREE.MathUtils.lerp(current, goal, speed), cfg.min, cfg.max,
+      );
+    }
 
-    // Rebuild matrices after setting final angles
     base.updateWorldMatrix(true, true);
-
-    // ── Export end-effector position for the ball magnet ─────────────────────
     ee.getWorldPosition(eeWorldPos.current);
     baseWorldPos.current.copy(v.basePos);
 
-    // ── Crosshair: frozen during idle so it never drifts ──────────────────
+    // ── Crosshair ──────────────────────────────────────────────────────────
     if (crosshairRef.current) {
       const projPos = isInactive.current ? frozenEEPos.current : eeWorldPos.current;
       const proj = projPos.clone().project(camera);
@@ -550,26 +522,23 @@ function InteractiveBall({
   // Sinking animation: set when ball enters hole, null otherwise
   const sinking = useRef<{ hx: number; hz: number } | null>(null);
   const scoreFired = useRef(false);
+  const _ballPos = useRef(new THREE.Vector3()); // pre-alloc, no per-frame heap alloc
 
   useFrame(({ camera }, delta) => {
     const rb = rigidRef.current;
     if (!rb) return;
 
-    // ── Sinking animation: ball fell into hole ───────────────────────────
     if (sinking.current) {
       const { hx, hz } = sinking.current;
       const cur = rb.translation();
       const newY = cur.y - delta * 1.8;
       rb.setNextKinematicTranslation({ x: hx, y: newY, z: hz });
-      if (newY < -0.25 && !scoreFired.current) {
-        scoreFired.current = true;
-        onScored();
-      }
+      if (newY < -0.25 && !scoreFired.current) { scoreFired.current = true; onScored(); }
       return;
     }
 
     const pos = rb.translation();
-    const ballPos = new THREE.Vector3(pos.x, pos.y, pos.z);
+    const ballPos = _ballPos.current.set(pos.x, pos.y, pos.z);
 
     // ── Active ball: detect leaving screen ──────────────────────────────
     if (isActive && !offscreenFired.current) {
@@ -720,6 +689,7 @@ export default function HeroRobot() {
   const mouseDown = useRef(false);
   const crosshairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     const down = () => { mouseDown.current = true; };
@@ -735,6 +705,7 @@ export default function HeroRobot() {
   return (
     <div ref={containerRef} className="w-full h-full cursor-none">
       <Canvas
+        frameloop={paused ? "never" : "always"}
         camera={{ position: [4, 3, 5], fov: 45, near: 0.1, far: 500 }}
         gl={{
           antialias: true,
@@ -742,7 +713,6 @@ export default function HeroRobot() {
           toneMappingExposure: .8,
           localClippingEnabled: true,
         }}
-        shadows
       >
         <Physics gravity={[0, -9.81, 0]}>
           <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} />
@@ -770,6 +740,14 @@ export default function HeroRobot() {
           <circle cx="14" cy="14" r="2.5" stroke="#111111" strokeWidth="1.5" />
         </svg>
       </div>
+
+      {/* Pause button */}
+      <button
+        onClick={() => setPaused((p) => !p)}
+        className="absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-full border border-[#ccc] bg-white/70 px-4 py-1.5 font-mono text-[0.65rem] uppercase tracking-widest text-[#666] backdrop-blur-sm transition-colors hover:border-[#999] hover:text-[#111]"
+      >
+        {paused ? "▶ Resume" : "⏸ Pause"}
+      </button>
     </div>
   );
 }

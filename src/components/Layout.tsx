@@ -61,15 +61,37 @@ export default function Layout() {
           {dropdownOpen && (
             <div ref={dropdownRef} className="mt-1 w-full rounded-2xl border border-border py-2 shadow-lg backdrop-blur-md">
               <Link
-                to="/projects/glass-cube"
+                to="/pages/ccd"
                 onClick={() => setDropdownOpen(false)}
                 className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
-                  location.pathname.startsWith("/projects")
+                  location.pathname === "/pages/ccd"
                     ? "text-text"
                     : "text-text-muted hover:text-text"
                 }`}
               >
-                Projects
+                Robot Arm
+              </Link>
+              <Link
+                to="/pages/fabrik"
+                onClick={() => setDropdownOpen(false)}
+                className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
+                  location.pathname === "/pages/fabrik"
+                    ? "text-text"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                Fish Sim
+              </Link>
+              <Link
+                to="/pages/particles"
+                onClick={() => setDropdownOpen(false)}
+                className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
+                  location.pathname === "/pages/particles"
+                    ? "text-text"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                Particle Sim
               </Link>
               <Link
                 to="/styleguide"
