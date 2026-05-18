@@ -21,7 +21,7 @@ function AlgoBox({
   return (
     <section className="relative z-10 bg-surface border-t border-border px-12 py-16">
       <div className="mx-auto max-w-6xl">
-        <div className="relative border-x border-b border-border">
+        <div className="relative">
           {/* Folder tab */}
           <div className="flex items-end">
             <div className="border border-b-0 border-border bg-surface flex items-center gap-3 px-5 py-2 shrink-0">
@@ -84,7 +84,7 @@ export default function HomePage() {
                 <p className="section-label mb-4">Inverse Kinematics</p>
                 <h1 className="font-doto text-8xl">LAYER_3</h1>
                 <p className="font-mono text-body text-text-muted mt-4 max-w-120">
-                  Two algorithms. Two simulations. One problem — making joints reach a target.
+                  An interactive introduction to inverse kinematics. Rendered live in the browser with Three.js.
                 </p>
               </div>
             </div>
@@ -125,7 +125,7 @@ export default function HomePage() {
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
               One Iteration — Step by Step
             </p>
-            <div className="space-y-0 border border-border mb-8">
+            <div className="space-y-3 mb-8">
               {[
                 ["01", "Pick the joint closest to the end-effector"],
                 ["02", "Compute the angle between EE → joint and target → joint"],
@@ -133,22 +133,19 @@ export default function HomePage() {
                 ["04", "Update world matrices and move to the next joint (toward base)"],
                 ["05", "Repeat the full cycle N times until error is below threshold"],
               ].map(([n, text]) => (
-                <div key={n} className="flex gap-4 px-4 py-3 border-b border-border last:border-b-0">
+                <div key={n} className="flex gap-4">
                   <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
                   <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
                 </div>
               ))}
             </div>
-            <div className="space-y-0 border border-border">
+            <div className="space-y-2">
               {[
                 { k: "Joints", v: "6" },
                 { k: "Iterations / frame", v: "8" },
                 { k: "Lerp smoothing", v: "0.035 – 0.095" },
-              ].map(({ k, v }, i) => (
-                <div
-                  key={k}
-                  className={`flex justify-between px-4 py-2 font-mono text-[0.72rem] ${i % 2 === 0 ? "bg-[#f0f0f0]" : ""}`}
-                >
+              ].map(({ k, v }) => (
+                <div key={k} className="flex justify-between font-mono text-[0.72rem]">
                   <span className="text-text-muted">{k}</span>
                   <span className="text-text">{v}</span>
                 </div>
@@ -195,29 +192,26 @@ export default function HomePage() {
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
               One Iteration — Step by Step
             </p>
-            <div className="space-y-0 border border-border mb-8">
+            <div className="space-y-3 mb-8">
               {[
                 ["01", "Move joint[0] (head) to the target position"],
                 ["02", "For each next joint: maintain segment length, drag direction constrained"],
                 ["03", "Apply max-bend angle constraint to prevent snake-like folding"],
                 ["04", "Result: a smooth curve from head to tail following the target"],
               ].map(([n, text]) => (
-                <div key={n} className="flex gap-4 px-4 py-3 border-b border-border last:border-b-0">
+                <div key={n} className="flex gap-4">
                   <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
                   <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
                 </div>
               ))}
             </div>
-            <div className="space-y-0 border border-border">
+            <div className="space-y-2">
               {[
                 { k: "Chain joints", v: "6 (spine)" },
                 { k: "Pass direction", v: "Forward only" },
                 { k: "Max bend / segment", v: "45°" },
-              ].map(({ k, v }, i) => (
-                <div
-                  key={k}
-                  className={`flex justify-between px-4 py-2 font-mono text-[0.72rem] ${i % 2 === 0 ? "bg-[#f0f0f0]" : ""}`}
-                >
+              ].map(({ k, v }) => (
+                <div key={k} className="flex justify-between font-mono text-[0.72rem]">
                   <span className="text-text-muted">{k}</span>
                   <span className="text-text">{v}</span>
                 </div>
@@ -236,7 +230,7 @@ export default function HomePage() {
         className="relative z-10 bg-surface border-t border-border px-12 py-16"
       >
         <div className="mx-auto max-w-6xl">
-          <div className="relative border-x border-b border-border">
+          <div className="relative">
             <div className="flex items-end">
               <div className="border border-b-0 border-border bg-surface flex items-center gap-3 px-5 py-2 shrink-0">
                 <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">Stack</span>

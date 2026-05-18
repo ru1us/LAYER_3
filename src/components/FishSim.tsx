@@ -3,6 +3,20 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 
+// ── Simulation parameters (exported for external control) ─────────────────
+export interface SimParams {
+  maxBend: number;       // max bend angle per segment in radians
+  orbitRadius: number;   // target orbit radius in world units
+  forceStrength: number; // speed / force multiplier (1 = default)
+  followSpeed: number;   // bone slerp factor per frame (0–1)
+}
+export const DEFAULT_SIM_PARAMS: SimParams = {
+  maxBend: Math.PI * 0.25,
+  orbitRadius: 1.44,
+  forceStrength: 1.0,
+  followSpeed: 0.4,
+};
+
 // ── FABRIK forward-only mit Winkelconstraint ──────────────────────────────
 // chain[0] = head (follows target), chain[N-1] = tail (drags behind)
 // maxBend = max Biegewinkel pro Segment in Radiant
@@ -42,9 +56,11 @@ function solveFABRIKForward(
 function FishScene({
   ndcMouse,
   mouseInCanvas,
+  params,
 }: {
   ndcMouse: React.MutableRefObject<THREE.Vector2>;
   mouseInCanvas: React.MutableRefObject<boolean>;
+  params: React.MutableRefObject<SimParams>;
 }) {
   const { scene } = useGLTF("/fih.glb");
   const fishTexture = useTexture("/fishtexture.png");
@@ -165,8 +181,8 @@ function FishScene({
       );
     }
 
-    const MAX_FORCE_BASE = 0.0018;
-    const ORBIT_R        = 1.44; // 1.8 × 0.8
+    const MAX_FORCE_BASE = 0.0018 * params.current.forceStrength;
+    const ORBIT_R        = params.current.orbitRadius;
 
     const toTarget = smoothTgt.current.clone().sub(fishPos.current);
     const dist     = toTarget.length();
@@ -216,7 +232,7 @@ function FishScene({
     const fabrikTarget = fishPos.current.clone();
 
     // ── FABRIK auf persistenten joints (KEIN Wave-Offset hier!) ───────────
-    solveFABRIKForward(joints.current, segLens.current, fabrikTarget);
+    solveFABRIKForward(joints.current, segLens.current, fabrikTarget, params.current.maxBend);
 
     // displayJoints = direkte Kopie (keine Welle, pre-allocated)
     for (let i = 0; i < joints.current.length; i++) {
@@ -262,7 +278,7 @@ function FishScene({
 
       // In lokalen Raum umrechnen
       const qLocal   = parentWorldQ.clone().invert().multiply(qDesiredWorld);
-      const qClamped = bones[i].quaternion.clone().slerp(qLocal, 0.4);
+      const qClamped = bones[i].quaternion.clone().slerp(qLocal, params.current.followSpeed);
       bones[i].quaternion.copy(qClamped);
       parentWorldQ = parentWorldQ.clone().multiply(qClamped);
     }
@@ -286,7 +302,9 @@ function FishScene({
 }
 
 // ── Public component ───────────────────────────────────────────────────────
-export default function FishSim() {
+export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObject<SimParams> }) {
+  const internalParamsRef = useRef<SimParams>(DEFAULT_SIM_PARAMS);
+  const params = paramsRef ?? internalParamsRef;
   const ndcMouse      = useRef(new THREE.Vector2(0, 0));
   const mouseInCanvas = useRef(false);
   const sectionRef    = useRef<HTMLElement>(null);
@@ -404,7 +422,7 @@ export default function FishSim() {
           <directionalLight position={[0, 10, -5]} intensity={0.6} color="#4488ff" />
 
           <Suspense fallback={null}>
-            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} />
+            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} params={params} />
           </Suspense>
         </Canvas>
         </div>

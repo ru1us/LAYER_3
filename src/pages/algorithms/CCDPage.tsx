@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { Link } from "react-router-dom";
+import HeroRobot from "../../components/HeroRobot.tsx";
 
-const GH = "https://github.com/ru1us/LAYER_3/blob/main/src/components/HeroRobot.tsx";
+const GH = "https://github.com/ru1us/LAYER_3";
 
 function CodeBlock({ children }: { children: string }) {
   return (
@@ -12,7 +14,7 @@ function CodeBlock({ children }: { children: string }) {
 
 function FolderBox({ tag, title, children }: { tag: string; title: string; children: React.ReactNode }) {
   return (
-    <div className="relative border-x border-b border-border">
+    <div className="relative">
       <div className="flex items-end">
         <div className="border border-b-0 border-border bg-surface flex items-center gap-3 px-5 py-2 shrink-0">
           <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">{tag}</span>
@@ -28,48 +30,100 @@ function FolderBox({ tag, title, children }: { tag: string; title: string; child
 export default function CCDPage() {
   return (
     <div className="bg-surface min-h-screen">
-      {/* Back */}
-      <div className="px-12 pt-10 pb-0">
+      {/* Header */}
+      <div className="mx-auto max-w-5xl px-12 pt-16 pb-10">
         <Link
           to="/"
           className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-text-muted hover:text-text transition-colors"
         >
           ← Back
         </Link>
-      </div>
-
-      <div className="mx-auto max-w-5xl px-12 py-12 space-y-10">
-        {/* Header */}
-        <div>
+        <div className="mt-8">
           <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-3">
-            Algorithm 01 · Implementation
+            Algorithm 01 · Three.js Implementation
           </p>
           <h1 className="font-doto text-5xl mb-4">CCD_IK</h1>
           <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted max-w-2xl">
-            Cyclic Coordinate Descent Inverse Kinematics — implemented in Three.js and React Three Fiber
-            for the interactive robot arm. Below is a walkthrough of the key implementation decisions.
+            A walkthrough of how the robot arm is built in Three.js and React Three Fiber —
+            scene setup, model loading, pointer-to-world mapping, and the frame loop.
           </p>
           <a
             href={GH}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 mt-5 font-mono text-[0.65rem] uppercase tracking-[0.18em] border border-border px-4 py-2 hover:bg-[#f0f0f0] transition-colors"
+            className="inline-flex items-center gap-3 mt-5 border border-border px-4 py-2 hover:bg-[#f0f0f0] transition-colors"
           >
-            View full source on GitHub →
+            <img src="/GitHub_Logo.svg" alt="GitHub" className="h-4 w-auto" />
+            <span className="font-mono text-[0.65rem] uppercase tracking-[0.18em]">ru1us/LAYER_3</span>
           </a>
         </div>
+      </div>
 
-        {/* Section 1 */}
-        <FolderBox tag="Step 01" title="BONE_CHAIN">
+      {/* Sim */}
+      <div className="relative h-screen">
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center bg-bg">
+              <div className="font-mono text-[0.7rem] uppercase tracking-caps text-text-muted">Loading...</div>
+            </div>
+          }
+        >
+          <HeroRobot />
+        </Suspense>
+      </div>
+
+      <div className="mx-auto max-w-5xl px-12 py-12 space-y-10">
+        <FolderBox tag="Step 01" title="CANVAS_SETUP">
           <div className="grid md:grid-cols-2 gap-10">
             <div>
-              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Concept</p>
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Three.js</p>
               <p className="font-mono text-[0.76rem] leading-relaxed text-text-muted">
-                The GLB model exports an <span className="text-text">Armature → Bone → Bone.001 … Bone.006</span> hierarchy.
-                On load, the chain is traversed and each bone is mapped to a{" "}
-                <span className="text-text">BoneConfig</span> that defines its rotation axis and joint limits.
-                Three.js strips dots from names, so <code className="text-text">Bone.001</code> becomes{" "}
-                <code className="text-text">Bone001</code> at runtime.
+                The scene lives inside a React Three Fiber <span className="text-text">{"<Canvas>"}</span> that
+                fills the viewport. A perspective camera sits at <span className="text-text">[0, 5, 8]</span> looking
+                at the origin. <span className="text-text">{"<ambientLight>"}</span> provides soft fill;
+                a <span className="text-text">{"<directionalLight>"}</span> casts shadows from above.
+                An invisible full-screen <span className="text-text">{"<Plane>"}</span> mesh catches pointer
+                events and forwards them to the IK target pipeline.
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Code</p>
+              <CodeBlock>{`
+<Canvas camera={{ position: [0, 5, 8], fov: 45 }}>
+  <ambientLight intensity={0.6} />
+  <directionalLight
+    position={[5, 10, 5]}
+    intensity={1.2}
+    castShadow
+  />
+  <RobotArm />
+  {/* invisible hit plane for pointer events */}
+  <Plane
+    args={[20, 20]}
+    rotation={[-Math.PI / 2, 0, 0]}
+    visible={false}
+    onPointerMove={onMove}
+  />
+</Canvas>
+              `}</CodeBlock>
+            </div>
+          </div>
+        </FolderBox>
+
+        {/* Section 2 */}
+        <FolderBox tag="Step 02" title="GLB_LOADER">
+          <div className="grid md:grid-cols-2 gap-10">
+            <div>
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Three.js</p>
+              <p className="font-mono text-[0.76rem] leading-relaxed text-text-muted">
+                The robot GLB is loaded with Drei's <span className="text-text">useGLTF</span> hook, which
+                returns a pre-parsed Three.js scene graph. <span className="text-text">scene.traverse()</span> walks
+                every node — bones are matched by name against <span className="text-text">BONE_CONFIG</span>,
+                which stores the constrained rotation axis and angle limits per joint.
+                All matched bone refs are stored in a <span className="text-text">useRef</span> map
+                for per-frame access without triggering re-renders. Three.js strips dots from
+                names at runtime, so <code className="text-text">Bone.001</code> becomes{" "}
+                <code className="text-text">Bone001</code>.
               </p>
             </div>
             <div>
@@ -81,23 +135,32 @@ const BONE_CONFIG = {
   "Bone002": { axis: "y", min: -PI/2, max: PI/2 },
   // …
 };
+
+const { scene } = useGLTF("/robot.glb");
+const bonesRef = useRef({});
+
+scene.traverse((node) => {
+  if (node.isBone && BONE_CONFIG[node.name]) {
+    bonesRef.current[node.name] = node;
+  }
+});
               `}</CodeBlock>
             </div>
           </div>
         </FolderBox>
 
-        {/* Section 2 */}
-        <FolderBox tag="Step 02" title="IK_TARGET">
+        {/* Section 3 */}
+        <FolderBox tag="Step 03" title="POINTER_PLANE">
           <div className="grid md:grid-cols-2 gap-10">
             <div>
-              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Concept</p>
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Three.js</p>
               <p className="font-mono text-[0.76rem] leading-relaxed text-text-muted">
-                The cursor's NDC coordinates are raycasted against two planes each frame:
-                a <span className="text-text">ground plane</span> (Y=0) and a{" "}
-                <span className="text-text">back plane</span> facing the camera.
-                Whichever intersection is closer to the camera wins. The result is smoothed
-                with a lerp factor of <span className="text-text">0.08</span> so the arm
-                follows with a natural lag.
+                Converting a 2D cursor position into a 3D world point requires a{" "}
+                <span className="text-text">Raycaster</span>. The ray is tested against
+                two <span className="text-text">Plane</span> objects each frame — a ground
+                plane at Y=0 and a vertical back plane facing the camera. The intersection
+                closer to the camera wins. The result is lerped by{" "}
+                <span className="text-text">0.08</span> each frame to produce smooth lag.
               </p>
             </div>
             <div>
@@ -118,66 +181,20 @@ smoothTarget.lerp(v.target, 0.08);
           </div>
         </FolderBox>
 
-        {/* Section 3 */}
-        <FolderBox tag="Step 03" title="CCD_SOLVER">
-          <div className="grid md:grid-cols-2 gap-10">
-            <div>
-              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Concept</p>
-              <p className="font-mono text-[0.76rem] leading-relaxed text-text-muted mb-4">
-                The solver runs <span className="text-text">8 iterations</span> per frame.
-                For each joint (working from tip to base), it:
-              </p>
-              <ol className="space-y-2">
-                {[
-                  "Gets the joint's constrained rotation axis in world space",
-                  "Projects both EE→joint and target→joint onto the plane perpendicular to that axis",
-                  "Computes the angle between the two projected vectors",
-                  "Clamps to joint limits and applies the rotation",
-                ].map((s, i) => (
-                  <li key={i} className="flex gap-3 font-mono text-[0.72rem] text-text-muted">
-                    <span className="font-doto text-text shrink-0">{String(i + 1).padStart(2, "0")}</span>
-                    {s}
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <div>
-              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Code</p>
-              <CodeBlock>{`
-for (let iter = 0; iter < 8; iter++) {
-  for (let i = joints.length - 1; i >= 0; i--) {
-    joint.getWorldQuaternion(worldQuat);
-    axisWorld.copy(axisLocal)
-             .applyQuaternion(worldQuat).normalize();
-
-    eeProj.copy(toEE).projectOnPlane(axisWorld).normalize();
-    tgProj.copy(toTarget).projectOnPlane(axisWorld).normalize();
-
-    let angle = Math.acos(clamp(eeProj.dot(tgProj), -1, 1));
-    cross.crossVectors(eeProj, tgProj);
-    if (cross.dot(axisWorld) < 0) angle = -angle;
-
-    joint.rotation[axis] = clamp(
-      joint.rotation[axis] + angle, min, max
-    );
-  }
-}
-              `}</CodeBlock>
-            </div>
-          </div>
-        </FolderBox>
-
         {/* Section 4 */}
-        <FolderBox tag="Step 04" title="LERP_PHASE">
+        <FolderBox tag="Step 04" title="USE_FRAME">
           <div className="grid md:grid-cols-2 gap-10">
             <div>
-              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Concept</p>
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-4">Three.js</p>
               <p className="font-mono text-[0.76rem] leading-relaxed text-text-muted">
-                The CCD solve runs on a <span className="text-text">copy</span> of the current angles.
-                The solved goal angles are then lerped toward — not applied directly — using a
-                per-joint follow speed defined in <span className="text-text">BONE_FOLLOW</span>.
-                The base responds fastest (0.035), the tip slowest (0.095), creating a
-                whip-like follow-through that makes the arm feel heavy and alive.
+                R3F's <span className="text-text">useFrame</span> fires after React's render phase
+                and before the WebGL draw call. Inside it, the CCD solve runs 8 times on goal
+                angle copies. Solved angles are never applied directly — they are lerped toward
+                using per-joint follow speeds from{" "}
+                <span className="text-text">BONE_FOLLOW</span>. The base responds at 0.035,
+                the tip at 0.095, creating a whip-like follow-through.{" "}
+                <span className="text-text">bone.updateWorldMatrix(true, false)</span> flushes
+                the hierarchy between CCD iterations so each bone reads a fresh world position.
               </p>
             </div>
             <div>
@@ -193,7 +210,18 @@ const BONE_FOLLOW = {
   "Bone006": 0.095, // tip – fastest
 };
 
-joint.rotation[axis] = lerp(current, goal, speed);
+useFrame(() => {
+  // 1. run CCD on goal copy
+  solveCCD(goalAngles, smoothTarget);
+  // 2. lerp current bone rotations toward goal
+  for (const [name, bone] of Object.entries(bones)) {
+    const speed = BONE_FOLLOW[name];
+    bone.rotation[axis] = lerp(
+      bone.rotation[axis], goalAngles[name], speed
+    );
+    bone.updateWorldMatrix(true, false);
+  }
+});
               `}</CodeBlock>
             </div>
           </div>
