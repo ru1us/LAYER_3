@@ -354,6 +354,11 @@ bone.quaternion.copy(
           </Link>
         </div>
       </div>
+
+      {/* QR Code */}
+      <div className="flex justify-center py-16 border-t border-border">
+        <img src="/qr.png" alt="QR Code" className="w-64 h-64 opacity-60" />
+      </div>
     </div>
   );
 }
