@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import HeroRobot from "../components/HeroRobot.tsx";
 import ParticleSim from "../components/ParticleSim.tsx";
 import FishSim from "../components/FishSim.tsx";
+import SpiderSim from "../components/SpiderSim.tsx";
 
 // ── Reusable folder-tab box ────────────────────────────────────────────────
 function AlgoBox({
@@ -63,6 +64,72 @@ export default function HomePage() {
 
   return (
     <div>
+      {/* ── Fish (FABRIK) ────────────────────── */}
+      <FishSim />
+
+      {/* ── FABRIK Explanation ───────────────── */}
+      <AlgoBox
+        tag="Algorithm 01"
+        title="FABRIK"
+        linkTo="/pages/fabrik"
+        left={
+          <>
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              A different approach
+            </p>
+            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted mb-6">
+              CCD works with <span className="text-text">angles</span>. FABRIK works with{" "}
+              <span className="text-text">positions</span>. Instead of rotating joints, it
+              repositions them — dragging the chain toward the target without ever computing
+              a rotation matrix.
+            </p>
+            <div className="h-px bg-border mb-6" />
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              Forward And Backward Reaching IK
+            </p>
+            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted">
+              FABRIK uses two passes. The <span className="text-text">forward pass</span> pulls
+              the tip to the target and drags each joint behind it. The{" "}
+              <span className="text-text">backward pass</span> re-anchors the base and adjusts
+              the chain back forward. The result is fast, stable, and produces naturally
+              flowing curves — ideal for organic chains like a fish spine.
+            </p>
+          </>
+        }
+        right={
+          <>
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
+              One Iteration — Step by Step
+            </p>
+            <div className="space-y-3 mb-8">
+              {[
+                ["01", "Move joint[0] (head) to the target position"],
+                ["02", "For each next joint: maintain segment length, drag direction constrained"],
+                ["03", "Apply max-bend angle constraint to prevent snake-like folding"],
+                ["04", "Result: a smooth curve from head to tail following the target"],
+              ].map(([n, text]) => (
+                <div key={n} className="flex gap-4">
+                  <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
+                  <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2">
+              {[
+                { k: "Chain joints", v: "6 (spine)" },
+                { k: "Pass direction", v: "Forward only" },
+                { k: "Max bend / segment", v: "45°" },
+              ].map(({ k, v }) => (
+                <div key={k} className="flex justify-between font-mono text-[0.72rem]">
+                  <span className="text-text-muted">{k}</span>
+                  <span className="text-text">{v}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        }
+      />
+
       {/* ── Hero (CCD Robot) ─────────────────── */}
       <section ref={heroRef} className="relative h-screen">
         <div className="sticky top-0 h-screen w-full">
@@ -78,23 +145,21 @@ export default function HomePage() {
             <HeroRobot />
           </Suspense>
 
-          <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none p-16">
-            <div className="flex items-end gap-16">
-              <div>
-                <p className="section-label mb-4">Inverse Kinematics</p>
-                <h1 className="font-doto text-8xl">LAYER_3</h1>
-                <p className="font-mono text-body text-text-muted mt-4 max-w-120">
-                  An interactive introduction to inverse kinematics. Rendered live in the browser with Three.js.
-                </p>
-              </div>
-            </div>
+          <div className="absolute bottom-0 left-0 z-20 pointer-events-none p-16">
+            <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#555555] mb-2">
+              Interactive
+            </p>
+            <h2 className="font-doto text-4xl text-[#ffffff]">CCD_IK</h2>
+            <p className="font-mono text-[0.65rem] text-[#555555] mt-2 tracking-widest">
+              Cyclic Coordinate Descent · follow cursor
+            </p>
           </div>
         </div>
       </section>
 
       {/* ── CCD Explanation ──────────────────── */}
       <AlgoBox
-        tag="Algorithm 01"
+        tag="Algorithm 02"
         title="CCD_IK"
         linkTo="/pages/ccd"
         left={
@@ -155,35 +220,51 @@ export default function HomePage() {
         }
       />
 
-      {/* ── Fish (FABRIK) ────────────────────── */}
-      <FishSim />
+      {/* ── Jacobian (Spider IK) ───────────────── */}
+      <section className="relative h-screen border-t border-border">
+        <div className="sticky top-0 h-screen w-full">
+          <SpiderSim />
+          <div className="absolute bottom-0 left-0 z-20 pointer-events-none p-16">
+            <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#555555] mb-2">
+              Interactive
+            </p>
+            <h2 className="font-doto text-4xl text-[#ffffff]">JACOBIAN_IK</h2>
+            <p className="font-mono text-[0.65rem] text-[#555555] mt-2 tracking-widest">
+              Jacobian Pseudo-Inverse · spider rig
+            </p>
+          </div>
+        </div>
+      </section>
 
-      {/* ── FABRIK Explanation ───────────────── */}
+      {/* ── Jacobian Explanation ─────────────── */}
       <AlgoBox
-        tag="Algorithm 02"
-        title="FABRIK"
-        linkTo="/pages/fabrik"
+        tag="Algorithm 03"
+        title="JACOBIAN_IK"
+        linkTo="/pages/jacobian"
         left={
           <>
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              A different approach
+              The Jacobian Matrix
             </p>
             <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted mb-6">
-              CCD works with <span className="text-text">angles</span>. FABRIK works with{" "}
-              <span className="text-text">positions</span>. Instead of rotating joints, it
-              repositions them — dragging the chain toward the target without ever computing
-              a rotation matrix.
+              The <span className="text-text">Jacobian</span> is a matrix that maps joint
+              velocities to end-effector velocities. Each column describes how much the
+              end-effector moves when one joint rotates by a tiny amount — a{" "}
+              <span className="text-text">linearisation</span> of the full forward kinematics
+              at the current configuration.
             </p>
             <div className="h-px bg-border mb-6" />
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              Forward And Backward Reaching IK
+              Pseudo-Inverse IK
             </p>
             <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted">
-              FABRIK uses two passes. The <span className="text-text">forward pass</span> pulls
-              the tip to the target and drags each joint behind it. The{" "}
-              <span className="text-text">backward pass</span> re-anchors the base and adjusts
-              the chain back forward. The result is fast, stable, and produces naturally
-              flowing curves — ideal for organic chains like a fish spine.
+              To move the tip toward a target, we compute the{" "}
+              <span className="text-text">position error</span> Δx and solve for joint
+              angle deltas via the{" "}
+              <span className="text-text">Moore–Penrose pseudo-inverse</span>: Δθ = J⁺ Δx.
+              Because the system is continuously re-linearised, the chain converges
+              smoothly — and unlike CCD, all joints move{" "}
+              <span className="text-text">simultaneously</span> in each step.
             </p>
           </>
         }
@@ -194,10 +275,11 @@ export default function HomePage() {
             </p>
             <div className="space-y-3 mb-8">
               {[
-                ["01", "Move joint[0] (head) to the target position"],
-                ["02", "For each next joint: maintain segment length, drag direction constrained"],
-                ["03", "Apply max-bend angle constraint to prevent snake-like folding"],
-                ["04", "Result: a smooth curve from head to tail following the target"],
+                ["01", "Compute world position of each joint via forward kinematics"],
+                ["02", "Build Jacobian J: column i = (joint_axis_i) × (EE − joint_i)"],
+                ["03", "Calculate error vector Δx = target − end-effector"],
+                ["04", "Compute pseudo-inverse J⁺ = Jᵀ (J Jᵀ + λ²I)⁻¹  (damped LS)"],
+                ["05", "Update all joint angles: Δθ = J⁺ Δx, clamp to joint limits"],
               ].map(([n, text]) => (
                 <div key={n} className="flex gap-4">
                   <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
@@ -207,9 +289,9 @@ export default function HomePage() {
             </div>
             <div className="space-y-2">
               {[
-                { k: "Chain joints", v: "6 (spine)" },
-                { k: "Pass direction", v: "Forward only" },
-                { k: "Max bend / segment", v: "45°" },
+                { k: "Joints", v: "6" },
+                { k: "Method", v: "Damped Least Squares" },
+                { k: "Damping factor λ", v: "0.05" },
               ].map(({ k, v }) => (
                 <div key={k} className="flex justify-between font-mono text-[0.72rem]">
                   <span className="text-text-muted">{k}</span>

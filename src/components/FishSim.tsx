@@ -57,10 +57,12 @@ function FishScene({
   ndcMouse,
   mouseInCanvas,
   params,
+  shadowEnabled,
 }: {
   ndcMouse: React.MutableRefObject<THREE.Vector2>;
   mouseInCanvas: React.MutableRefObject<boolean>;
   params: React.MutableRefObject<SimParams>;
+  shadowEnabled: boolean;
 }) {
   const { scene } = useGLTF("/fih.glb");
   const fishTexture = useTexture("/fishtexture.png");
@@ -71,6 +73,9 @@ function FishScene({
     fishTexture.flipY = false;
     fishTexture.needsUpdate = true;
     scene.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.castShadow = shadowEnabled;
+      }
       if (!(obj instanceof THREE.SkinnedMesh)) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       mats.forEach((m) => {
@@ -79,7 +84,7 @@ function FishScene({
         mat.needsUpdate = true;
       });
     });
-  }, [scene, fishTexture]);
+  }, [scene, fishTexture, shadowEnabled]);
 
   const spineBones    = useRef<THREE.Bone[]>([]);
   const restQuats     = useRef<THREE.Quaternion[]>([]); // lokale Rest-Quaternions
@@ -292,6 +297,12 @@ function FishScene({
   return (
     <>
       <primitive object={scene} />
+      {shadowEnabled && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow>
+          <planeGeometry args={[80, 80]} />
+          <shadowMaterial transparent opacity={0.42} />
+        </mesh>
+      )}
       {/* End-Effector */}
       <mesh ref={effectorRef}>
         <sphereGeometry args={[0.1, 10, 10]} />
@@ -306,10 +317,40 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
   const internalParamsRef = useRef<SimParams>(DEFAULT_SIM_PARAMS);
   const params = paramsRef ?? internalParamsRef;
   const ndcMouse      = useRef(new THREE.Vector2(0, 0));
+  const bgTitleRef    = useRef<HTMLDivElement>(null);
+  const bgGridRef     = useRef<HTMLDivElement>(null);
+  const bgParallaxTarget = useRef(new THREE.Vector2(0, 0));
+  const bgParallaxCurrent = useRef(new THREE.Vector2(0, 0));
   const mouseInCanvas = useRef(false);
   const sectionRef    = useRef<HTMLElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const [shadowEnabled, setShadowEnabled] = useState(false);
+  const [maxBendDeg, setMaxBendDeg] = useState((params.current.maxBend * 180) / Math.PI);
+  const [orbitRadius, setOrbitRadius] = useState(params.current.orbitRadius);
+  const [forceStrength, setForceStrength] = useState(params.current.forceStrength);
+  const [followSpeed, setFollowSpeed] = useState(params.current.followSpeed);
+
+  function updateMaxBendDeg(nextDeg: number) {
+    setMaxBendDeg(nextDeg);
+    params.current.maxBend = (nextDeg * Math.PI) / 180;
+  }
+
+  function updateOrbitRadius(next: number) {
+    setOrbitRadius(next);
+    params.current.orbitRadius = next;
+  }
+
+  function updateForceStrength(next: number) {
+    setForceStrength(next);
+    params.current.forceStrength = next;
+  }
+
+  function updateFollowSpeed(next: number) {
+    setFollowSpeed(next);
+    params.current.followSpeed = next;
+  }
 
   // Mount canvas only once section is near viewport (same pattern as ParticleSim)
   useEffect(() => {
@@ -329,22 +370,51 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
     return () => window.removeEventListener("scroll", check);
   }, [loaded]);
 
+  useEffect(() => {
+    let raf = 0;
+
+    const tick = () => {
+      const current = bgParallaxCurrent.current;
+      const target = bgParallaxTarget.current;
+      current.lerp(target, 0.16);
+
+      if (bgTitleRef.current) {
+        bgTitleRef.current.style.transform = `translate3d(${current.x}px, ${current.y}px, 0)`;
+      }
+      if (bgGridRef.current) {
+        bgGridRef.current.style.transform = `translate3d(${current.x * 0.55}px, ${current.y * 0.55}px, 0)`;
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   function onMouseMove(e: React.MouseEvent) {
+    mouseInCanvas.current = true;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     ndcMouse.current.set(
       ((e.clientX - rect.left) / rect.width)  *  2 - 1,
      -((e.clientY - rect.top)  / rect.height) *  2 + 1
     );
+
+    bgParallaxTarget.current.set(-ndcMouse.current.x * 24, ndcMouse.current.y * 14);
   }
 
   return (
-    <section
-      ref={sectionRef}
-      className="relative z-10 bg-[#000000] border-t border-border h-160"
-      onMouseMove={onMouseMove}
-      onMouseEnter={() => { mouseInCanvas.current = true; }}
-      onMouseLeave={() => { mouseInCanvas.current = false; }}
-    >
+    <div className="relative z-10 bg-bg border-b border-border">
+      <section
+        ref={sectionRef}
+        className="relative bg-bg h-screen"
+        onMouseMove={onMouseMove}
+        onMouseEnter={() => { mouseInCanvas.current = true; }}
+        onMouseLeave={() => {
+          mouseInCanvas.current = false;
+          bgParallaxTarget.current.set(0, 0);
+        }}
+      >
       {/* SVG-Wasserfilter Definition */}
       <svg style={{ position: "absolute", width: 0, height: 0 }}>
         <defs>
@@ -358,32 +428,21 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
             >
               <animate
                 attributeName="baseFrequency"
-                dur="9s"
-                values="0.008 0.014;0.011 0.018;0.007 0.012;0.008 0.014"
+                dur="14s"
+                values="0.0075 0.0125;0.0085 0.0135;0.0072 0.012;0.0075 0.0125"
                 repeatCount="indefinite"
               />
             </feTurbulence>
             <feDisplacementMap
               in="SourceGraphic"
               in2="noise"
-              scale="22"
+              scale="16"
               xChannelSelector="R"
               yChannelSelector="G"
             />
           </filter>
         </defs>
       </svg>
-
-      {/* Label */}
-      <div className="absolute top-8 left-12 z-10 pointer-events-none">
-        <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#555555] mb-2">
-          Interactive
-        </p>
-        <h2 className="font-doto text-4xl text-[#ffffff]">FISH_IK</h2>
-        <p className="font-mono text-[0.65rem] text-[#555555] mt-2 tracking-widest">
-          FABRIK inverse kinematics · follow cursor
-        </p>
-      </div>
 
       {/* Pause button */}
       <button
@@ -393,15 +452,121 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
         {paused ? "▶ Resume" : "⏸ Pause"}
       </button>
 
+      {/* Controls toggle + panel (overlay) */}
+      <div className="absolute bottom-6 left-1/2 z-30 w-[min(92vw,680px)] -translate-x-1/2">
+        <div className="mx-auto w-fit">
+          {showControls && (
+            <div className="mb-2 rounded-2xl border border-border bg-surface/85 p-6 shadow-lg backdrop-blur-md max-h-[42vh] overflow-y-auto">
+              <div className="grid md:grid-cols-2 gap-4">
+                <label className="block">
+                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
+                    <span>Max Bend</span>
+                    <span>{maxBendDeg.toFixed(0)}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={10}
+                    max={90}
+                    step={1}
+                    value={maxBendDeg}
+                    onChange={(e) => updateMaxBendDeg(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
+                    <span>Orbit Radius</span>
+                    <span>{orbitRadius.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.8}
+                    max={3}
+                    step={0.01}
+                    value={orbitRadius}
+                    onChange={(e) => updateOrbitRadius(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
+                    <span>Force Strength</span>
+                    <span>{forceStrength.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={2}
+                    step={0.01}
+                    value={forceStrength}
+                    onChange={(e) => updateForceStrength(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
+                    <span>Follow Speed</span>
+                    <span>{followSpeed.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.05}
+                    max={1}
+                    step={0.01}
+                    value={followSpeed}
+                    onChange={(e) => updateFollowSpeed(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+
+                <div className="md:col-span-2 mt-1 flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                  <span className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">Ground Shadow</span>
+                  <button
+                    onClick={() => setShadowEnabled((v) => !v)}
+                    className={`rounded-full border px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.14em] transition-colors ${shadowEnabled ? "border-text text-text" : "border-border text-text-muted hover:text-text"}`}
+                  >
+                    {shadowEnabled ? "On" : "Off"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowControls((v) => !v)}
+            className="flex items-center gap-3 rounded-full border border-border px-6 py-3 font-mono text-[0.7rem] uppercase tracking-[0.16em] text-text-muted backdrop-blur-sm transition-colors hover:text-text"
+          >
+            <span>Simulation Controls</span>
+            <span className="font-doto text-lg leading-none">{showControls ? "−" : "+"}</span>
+          </button>
+        </div>
+      </div>
+
       {loaded && (
-        <div style={{ filter: "url(#water-distort)" }} className="w-full h-full">
+        <div style={{ filter: "url(#water-distort)" }} className="relative z-10 w-full h-full">
+          {/* Background title with subtle parallax */}
+          <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+            <div className="absolute inset-0 flex items-center justify-center px-8">
+              <div ref={bgTitleRef} className="text-center opacity-35 will-change-transform">
+                <h1 className="font-doto text-[10rem] md:text-[13rem] leading-none text-[#111111]">LAYER_3</h1>
+                <p className="font-mono text-body text-[#444444] mt-4 max-w-120 mx-auto">
+                  An interactive introduction to inverse kinematics. Rendered live in the browser with Three.js.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Grid background – innerhalb des Wasserfilters */}
           <div
-            className="absolute inset-0 pointer-events-none"
+            ref={bgGridRef}
+            className="absolute inset-0 z-[5] pointer-events-none will-change-transform"
             style={{
               backgroundImage: `
-                linear-gradient(to right, #1c1c1c 1px, transparent 1px),
-                linear-gradient(to bottom, #1c1c1c 1px, transparent 1px)
+                linear-gradient(to right, rgba(0, 0, 0, 0.08) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 0, 0, 0.08) 1px, transparent 1px)
               `,
               backgroundSize: "96px 96px",
             }}
@@ -409,24 +574,44 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           <Canvas
           frameloop={paused ? "never" : "always"}
           orthographic
-          camera={{ position: [0, 200, 0], zoom: 52.5, near: 1, far: 1000 }}
+          shadows={shadowEnabled}
+          camera={{ position: [0, 200, 0], zoom: 80, near: 1, far: 1000 }}
           gl={{ antialias: true, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
-          className="w-full h-full"
+          className="relative z-10 w-full h-full"
           onCreated={({ camera, gl }) => {
             camera.lookAt(0, 0, 0);
             gl.setClearColor(0x000000, 0); // transparent
           }}
         >
-          <ambientLight intensity={0.6} />
+          <ambientLight intensity={shadowEnabled ? 0.38 : 0.6} />
           <directionalLight position={[0, 10, 5]}  intensity={2.0} color="#ffffff" />
           <directionalLight position={[0, 10, -5]} intensity={0.6} color="#4488ff" />
+          {shadowEnabled && (
+            <directionalLight
+              position={[16, 11, 10]}
+              intensity={1.15}
+              color="#ffffff"
+              castShadow
+              shadow-mapSize-width={2048}
+              shadow-mapSize-height={2048}
+              shadow-bias={-0.0004}
+              shadow-normalBias={0.02}
+              shadow-camera-near={1}
+              shadow-camera-far={80}
+              shadow-camera-left={-24}
+              shadow-camera-right={24}
+              shadow-camera-top={24}
+              shadow-camera-bottom={-24}
+            />
+          )}
 
           <Suspense fallback={null}>
-            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} params={params} />
+            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} params={params} shadowEnabled={shadowEnabled} />
           </Suspense>
         </Canvas>
         </div>
       )}
-    </section>
+      </section>
+    </div>
   );
 }
