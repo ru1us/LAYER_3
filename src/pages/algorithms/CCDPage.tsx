@@ -1,8 +1,18 @@
-import { Suspense } from "react";
+import { Suspense, lazy } from "react";
 import { Link } from "react-router-dom";
-import HeroRobot from "../../components/HeroRobot.tsx";
+import DeferredCanvas from "../../components/DeferredCanvas.tsx";
+
+const HeroRobot = lazy(() => import("../../components/HeroRobot.tsx"));
 
 const GH = "https://github.com/ru1us/LAYER_3";
+
+function CanvasFallback() {
+  return (
+    <div className="flex h-full min-h-screen items-center justify-center bg-bg">
+      <div className="font-mono text-[0.7rem] uppercase tracking-caps text-text-muted">Loading...</div>
+    </div>
+  );
+}
 
 function CodeBlock({ children }: { children: string }) {
   return (
@@ -61,15 +71,11 @@ export default function CCDPage() {
 
       {/* Sim */}
       <div className="relative h-screen">
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center bg-bg">
-              <div className="font-mono text-[0.7rem] uppercase tracking-caps text-text-muted">Loading...</div>
-            </div>
-          }
-        >
-          <HeroRobot />
-        </Suspense>
+        <DeferredCanvas className="h-full w-full" fallback={<CanvasFallback />}>
+          <Suspense fallback={<CanvasFallback />}>
+            <HeroRobot />
+          </Suspense>
+        </DeferredCanvas>
       </div>
 
       <div className="mx-auto max-w-5xl px-12 py-12 space-y-10">

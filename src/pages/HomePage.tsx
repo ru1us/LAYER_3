@@ -1,26 +1,36 @@
-import { useRef, Suspense } from "react";
-import { Link } from "react-router-dom";
-import HeroRobot from "../components/HeroRobot.tsx";
-import ParticleSim from "../components/ParticleSim.tsx";
-import FishSim from "../components/FishSim.tsx";
-import SpiderSim from "../components/SpiderSim.tsx";
+import { useRef, Suspense, lazy } from "react";
+import DeferredCanvas from "../components/DeferredCanvas.tsx";
+
+const HeroRobot = lazy(() => import("../components/HeroRobot.tsx"));
+const FishSim = lazy(() => import("../components/FishSim.tsx"));
+const SpiderSim = lazy(() => import("../components/SpiderSim.tsx"));
 
 // ── Reusable folder-tab box ────────────────────────────────────────────────
+function CanvasFallback() {
+  return (
+    <div className="flex h-full min-h-screen items-center justify-center bg-bg">
+      <div className="font-mono text-[0.7rem] tracking-caps uppercase text-text-muted">
+        Loading...
+      </div>
+    </div>
+  );
+}
+
 function AlgoBox({
   tag,
   title,
   left,
   right,
-  linkTo,
+  id,
 }: {
   tag: string;
   title: string;
   left: React.ReactNode;
   right: React.ReactNode;
-  linkTo: string;
+  id: string;
 }) {
   return (
-    <section className="relative z-10 bg-surface border-t border-border px-12 py-16">
+    <section id={id} className="relative z-10 scroll-mt-28 bg-surface border-t border-border px-12 py-16">
       <div className="mx-auto max-w-6xl">
         <div className="relative">
           {/* Folder tab */}
@@ -45,13 +55,9 @@ function AlgoBox({
             <span className="font-mono text-[0.6rem] text-text-muted uppercase tracking-[0.18em]">
               Three.js · React Three Fiber
             </span>
-            <Link
-              to={linkTo}
-              className="font-mono text-[0.7rem] uppercase tracking-[0.18em] text-text hover:text-text-muted transition-colors flex items-center gap-2"
-            >
-              View Implementation
-              <span className="font-mono">→</span>
-            </Link>
+            <span className="font-mono text-[0.7rem] uppercase tracking-[0.18em] text-text-muted">
+              Scroll study section
+            </span>
           </div>
         </div>
       </div>
@@ -65,13 +71,17 @@ export default function HomePage() {
   return (
     <div>
       {/* ── Fish (FABRIK) ────────────────────── */}
-      <FishSim />
+      <DeferredCanvas className="relative z-10 min-h-screen" fallback={<CanvasFallback />} rootMargin="75% 0px">
+        <Suspense fallback={<CanvasFallback />}>
+          <FishSim />
+        </Suspense>
+      </DeferredCanvas>
 
       {/* ── FABRIK Explanation ───────────────── */}
       <AlgoBox
         tag="Algorithm 01"
         title="FABRIK"
-        linkTo="/pages/fabrik"
+        id="fabrik"
         left={
           <>
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
@@ -131,19 +141,13 @@ export default function HomePage() {
       />
 
       {/* ── Hero (CCD Robot) ─────────────────── */}
-      <section ref={heroRef} className="relative h-screen">
+      <section ref={heroRef} id="ccd" className="relative h-screen scroll-mt-28">
         <div className="sticky top-0 h-screen w-full">
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center bg-bg">
-                <div className="font-mono text-[0.7rem] tracking-caps uppercase text-text-muted">
-                  Loading...
-                </div>
-              </div>
-            }
-          >
-            <HeroRobot />
-          </Suspense>
+          <DeferredCanvas className="h-full w-full" fallback={<CanvasFallback />}>
+            <Suspense fallback={<CanvasFallback />}>
+              <HeroRobot />
+            </Suspense>
+          </DeferredCanvas>
 
           <div className="absolute bottom-0 left-0 z-20 pointer-events-none p-16">
             <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#555555] mb-2">
@@ -161,7 +165,7 @@ export default function HomePage() {
       <AlgoBox
         tag="Algorithm 02"
         title="CCD_IK"
-        linkTo="/pages/ccd"
+        id="ccd-study"
         left={
           <>
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
@@ -221,9 +225,13 @@ export default function HomePage() {
       />
 
       {/* ── Jacobian (Spider IK) ───────────────── */}
-      <section className="relative h-screen border-t border-border">
+      <section id="jacobian" className="relative h-screen scroll-mt-28 border-t border-border">
         <div className="sticky top-0 h-screen w-full">
-          <SpiderSim />
+          <DeferredCanvas className="h-full w-full" fallback={<CanvasFallback />}>
+            <Suspense fallback={<CanvasFallback />}>
+              <SpiderSim />
+            </Suspense>
+          </DeferredCanvas>
           <div className="absolute bottom-0 left-0 z-20 pointer-events-none p-16">
             <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#555555] mb-2">
               Interactive
@@ -240,7 +248,7 @@ export default function HomePage() {
       <AlgoBox
         tag="Algorithm 03"
         title="JACOBIAN_IK"
-        linkTo="/pages/jacobian"
+        id="jacobian-study"
         left={
           <>
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
@@ -303,8 +311,6 @@ export default function HomePage() {
         }
       />
 
-      {/* ── Particle Sim (Bonus) ─────────────── */}
-      <ParticleSim />
 
       {/* ── Tech stack ───────────────────────── */}
       <section

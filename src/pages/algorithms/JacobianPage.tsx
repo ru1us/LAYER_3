@@ -1,8 +1,20 @@
-import { Suspense } from "react";
+import { Suspense, lazy } from "react";
 import { Link } from "react-router-dom";
-import SpiderSim from "../../components/SpiderSim.tsx";
+import DeferredCanvas from "../../components/DeferredCanvas.tsx";
+
+const SpiderSim = lazy(() => import("../../components/SpiderSim.tsx"));
 
 const GH = "https://github.com/ru1us/LAYER_3";
+
+function CanvasFallback() {
+  return (
+    <div className="flex h-full min-h-screen items-center justify-center bg-bg">
+      <span className="font-mono text-[0.6rem] uppercase tracking-[0.3em] text-text-muted">
+        Loading...
+      </span>
+    </div>
+  );
+}
 
 function CodeBlock({ children }: { children: string }) {
   return (
@@ -74,17 +86,11 @@ export default function JacobianPage() {
 
       {/* Spider IK canvas */}
       <div className="relative h-screen border-t border-border overflow-hidden">
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center bg-bg">
-              <span className="font-mono text-[0.6rem] uppercase tracking-[0.3em] text-text-muted">
-                Loading...
-              </span>
-            </div>
-          }
-        >
-          <SpiderSim />
-        </Suspense>
+        <DeferredCanvas className="h-full w-full" fallback={<CanvasFallback />}>
+          <Suspense fallback={<CanvasFallback />}>
+            <SpiderSim />
+          </Suspense>
+        </DeferredCanvas>
       </div>
 
       <div className="mx-auto max-w-5xl px-12 py-12 space-y-10">

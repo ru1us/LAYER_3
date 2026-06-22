@@ -28,4 +28,3 @@ export function BallModel() {
   return <primitive object={clonedScene} />;
 }
 
-useGLTF.preload("/ball.glb");

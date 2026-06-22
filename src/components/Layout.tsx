@@ -34,14 +34,21 @@ export default function Layout() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  useEffect(() => {
+    if (!location.hash) return;
+    const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!target) return;
+    requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [location]);
+
   return (
     <div className="flex min-h-screen flex-col bg-bg">
       {/* ── Navbar ────────────────────────────── */}
       <header className={`fixed top-0 left-0 right-0 z-50 flex justify-center px-4 transition-transform duration-300 ${navVisible ? "translate-y-4" : "-translate-y-full"}`}>
-        <div ref={navRef} className="relative flex w-full max-w-lg flex-col">
+        <div ref={navRef} className="relative flex w-full max-w-4xl flex-col">
           {/* Pill */}
-          <div className="flex items-center justify-between rounded-full border border-border px-6 py-3 backdrop-blur-sm">
-            <Link to="/" className="font-doto text-xl tracking-ui">
+          <div className="flex items-center justify-between gap-6 rounded-full border border-border bg-surface/75 px-6 py-3 backdrop-blur-md">
+            <Link to="/" onClick={() => setDropdownOpen(false)} className="font-doto text-xl tracking-ui">
               LAYER_3
             </Link>
 
@@ -61,37 +68,39 @@ export default function Layout() {
           {dropdownOpen && (
             <div ref={dropdownRef} className="mt-1 w-full rounded-2xl border border-border py-2 shadow-lg backdrop-blur-md">
               <Link
-                to="/pages/ccd"
-                onClick={() => setDropdownOpen(false)}
-                className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
-                  location.pathname === "/pages/ccd"
-                    ? "text-text"
-                    : "text-text-muted hover:text-text"
-                }`}
+                to="/"
+                onClick={() => {
+                  setDropdownOpen(false);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className="block px-6 py-2 font-mono text-sm uppercase tracking-nav text-text-muted transition-colors hover:text-text"
               >
-                Robot Arm
+                FABRIK
               </Link>
               <Link
-                to="/pages/fabrik"
+                to="/#ccd"
                 onClick={() => setDropdownOpen(false)}
-                className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
-                  location.pathname === "/pages/fabrik"
-                    ? "text-text"
-                    : "text-text-muted hover:text-text"
-                }`}
+                className="block px-6 py-2 font-mono text-sm uppercase tracking-nav text-text-muted transition-colors hover:text-text"
               >
-                Fish Sim
+                CCD
               </Link>
               <Link
-                to="/pages/particles"
+                to="/#jacobian"
+                onClick={() => setDropdownOpen(false)}
+                className="block px-6 py-2 font-mono text-sm uppercase tracking-nav text-text-muted transition-colors hover:text-text"
+              >
+                Jacobian
+              </Link>
+              <Link
+                to="/about"
                 onClick={() => setDropdownOpen(false)}
                 className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
-                  location.pathname === "/pages/particles"
+                  location.pathname === "/about"
                     ? "text-text"
                     : "text-text-muted hover:text-text"
                 }`}
               >
-                Particle Sim
+                About
               </Link>
               <Link
                 to="/styleguide"

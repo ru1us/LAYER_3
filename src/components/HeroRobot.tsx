@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Physics, RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
 import * as THREE from "three";
 import { BallModel } from "./BallModel";
+import { PauseButton } from "./sim";
 
 const COLOR_BG = "#F5F5F5";
 
@@ -36,8 +37,8 @@ const REST_THRESHOLD_Y = -0.75;
 // Idle animation sequence: wait → wrist flick → look around → return
 const INACTIVITY_DELAY  = 2.0;
 const DEFAULT_TARGET    = new THREE.Vector3(-0.5, 0.1, 0.25);
-const IDLE_BLEND_SPEED  = 0.3; // ramp speed for idle in/out
-const IDLE_BASE_AMP     = 0.25; // how much the base sweeps in radians // default rest pose
+const IDLE_BLEND_SPEED  = 0.6; // ramp speed for idle in/out
+const IDLE_BASE_AMP     = 0.3; // how much the base sweeps in radians // default rest pose
 
 
 const BONE_CONFIG: Record<string, BoneConfig> = {
@@ -58,7 +59,7 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
 
 function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null> }) {
   const gltf = useGLTF("/robot2.glb");
-  const { scene, camera, size } = useThree();
+  const { scene, camera, size, gl } = useThree();
   const glbCamApplied = useRef(false);
 
   const baseRef = useRef<THREE.Object3D | null>(null);
@@ -181,33 +182,28 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
   useEffect(() => {
     let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
     const onMove = (e: MouseEvent) => {
-      isMouseGone.current = false;
-      isInactive.current = false;
-      idleBlend.current = 0;
-      if (inactivityTimer) clearTimeout(inactivityTimer);
-      inactivityTimer = setTimeout(() => { isInactive.current = true; }, INACTIVITY_DELAY * 1000);
-      const el = containerRef.current;
-      if (!el) return;
+      const el = gl.domElement;
       const rect = el.getBoundingClientRect();
+      const inside =
+        e.clientX >= rect.left && e.clientX <= rect.right &&
+        e.clientY >= rect.top  && e.clientY <= rect.bottom;
+      isMouseGone.current = !inside;
+      if (inside) {
+        isInactive.current = false;
+        idleBlend.current = 0;
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => { isInactive.current = true; }, INACTIVITY_DELAY * 1000);
+      }
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
       mouseNDC.current.set(x, y);
     };
-    const onLeave = (e: MouseEvent) => {
-      if (e.relatedTarget === null) {
-        isMouseGone.current = true;
-        isInactive.current = false;
-        if (inactivityTimer) clearTimeout(inactivityTimer);
-      }
-    };
     window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseout", onLeave);
     return () => {
       window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseout", onLeave);
       if (inactivityTimer) clearTimeout(inactivityTimer);
     };
-  }, []);
+  }, [gl]);
 
   // Reusable vectors
   const _v = useRef({
@@ -370,7 +366,14 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
       const desired = Math.atan2(localTarget.x - base.position.x, localTarget.z - base.position.z);
       base.rotation[baseConfig.axis] = THREE.MathUtils.clamp(desired, baseConfig.min, baseConfig.max);
       if (idleBlend.current > 0) {
-        base.rotation[baseConfig.axis] += Math.sin(idleTime.current * 0.28) * IDLE_BASE_AMP * idleBlend.current;
+        const t = idleTime.current;
+        const raw = Math.sin(t * 0.3);
+        const shaped = raw >= 0
+          ? raw * raw * raw
+          : -Math.pow(-raw, 1.2);
+        const jitter = Math.sin(t * 0.73) * 0.04;
+        const idleSweep = (shaped + jitter) * IDLE_BASE_AMP * idleBlend.current;
+        base.rotation[baseConfig.axis] += idleSweep;
       }
       base.updateWorldMatrix(true, true);
     }
@@ -706,6 +709,7 @@ export default function HeroRobot() {
     <div ref={containerRef} className="w-full h-full cursor-none">
       <Canvas
         frameloop={paused ? "never" : "always"}
+        dpr={[1, 1.5]}
         camera={{ position: [4, 3, 5], fov: 45, near: 0.1, far: 500 }}
         gl={{
           antialias: true,
@@ -742,15 +746,9 @@ export default function HeroRobot() {
       </div>
 
       {/* Pause button */}
-      <button
-        onClick={() => setPaused((p) => !p)}
-        className="absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-full border border-[#ccc] bg-white/70 px-4 py-1.5 font-mono text-[0.65rem] uppercase tracking-widest text-[#666] backdrop-blur-sm transition-colors hover:border-[#999] hover:text-[#111]"
-      >
-        {paused ? "▶ Resume" : "⏸ Pause"}
-      </button>
+      <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
     </div>
   );
 }
 
-useGLTF.preload("/robot2.glb");
 

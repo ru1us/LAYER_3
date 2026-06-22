@@ -23,7 +23,7 @@
  */
 
 import { useGLTF, Environment } from "@react-three/drei";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
@@ -33,6 +33,17 @@ const IK_ITER       = 20;                   // Jacobian iterations per leg per f
 const DLS_LAMBDA    = 0.03;                 // damping factor
 const DLS_LAMBDA_SQ = DLS_LAMBDA * DLS_LAMBDA;
 const HEAD_SMOOTH   = 0.05;                 // head rotation lerp speed
+const INACTIVITY_DELAY = 2.0;
+const IDLE_BLEND_SPEED = 0.6;
+const IDLE_YAW_AMP     = 0.45;
+const IDLE_PITCH_AMP   = 0.2;
+const STEP_TRIGGER_DIST = 0.24;
+const STEP_TRIGGER_DIST_SQ = STEP_TRIGGER_DIST * STEP_TRIGGER_DIST;
+const STEP_HEIGHT = 0.34;
+const STEP_SPEED = 1.8;
+const STEP_COOLDOWN = 0.4;
+const STEP_LEAD = 1.6;
+const STEP_MAX_LEAD = 0.18;
 
 const LEG_NAMES = ["L1", "L2", "L3", "L4", "R1", "R2", "R3", "R4"] as const;
 
@@ -45,6 +56,8 @@ const _ee   = new THREE.Vector3();   // end-effector world position
 const _r    = new THREE.Vector3();   // ee − joint
 const _err  = new THREE.Vector3();   // target − ee
 const _col  = new THREE.Vector3();   // Jacobian column (axisW × r)
+const _stepDesired = new THREE.Vector3();
+const _stepLead = new THREE.Vector3();
 
 // Jacobian stored as n×3 row-major Float64Array: row = joint, cols = [vx,vy,vz]
 const _jBuf = new Float64Array(5 * 3);   // max 5 joints
@@ -77,6 +90,14 @@ interface LegData {
   clamp: [number, number][];
   target: THREE.Vector3;
   endLocal: THREE.Vector3;
+  stepFrom: THREE.Vector3;
+  stepTo: THREE.Vector3;
+  homeLocal: THREE.Vector3;
+  prevDesired: THREE.Vector3;
+  groundY: number;
+  stepProgress: number;
+  stepCooldown: number;
+  isStepping: boolean;
 }
 
 function getLowestWorldPoint(root: THREE.Object3D): THREE.Vector3 {
@@ -162,16 +183,121 @@ function solveOneLeg(leg: LegData): void {
       joints[i].updateWorldMatrix(false, true);
     }
   }
+
+  // ── Floor clamp: lift foot back to groundY if IK left it below ────────
+  for (let clamped = 0; clamped < 6; clamped++) {
+    joints[n - 1].localToWorld(_ee.copy(endLocal));
+    const dy = leg.groundY - _ee.y;
+    if (dy < 0.002) break;
+
+    // Build Y-only Jacobian (1-DOF: all joints vs. Y error)
+    for (let i = 0; i < n; i++) {
+      joints[i].getWorldQuaternion(_wq);
+      _axL.set(isRoot[i] ? 0 : 1, 0, isRoot[i] ? 1 : 0);
+      _axW.copy(_axL).applyQuaternion(_wq).normalize();
+      joints[i].getWorldPosition(_jPos);
+      _r.subVectors(_ee, _jPos);
+      _col.crossVectors(_axW, _r);
+      _jBuf[i * 3 + 0] = _col.y;  // Y component only
+    }
+
+    let jjt = DLS_LAMBDA_SQ;
+    for (let i = 0; i < n; i++) jjt += _jBuf[i * 3 + 0] * _jBuf[i * 3 + 0];
+    if (jjt < 1e-10) break;
+    const dTheta = dy / jjt;
+
+    for (let i = 0; i < n; i++) {
+      const axis: "z" | "x" = isRoot[i] ? "z" : "x";
+      const [mn, mx] = leg.clamp[i];
+      joints[i].rotation[axis] = THREE.MathUtils.clamp(
+        joints[i].rotation[axis] + _jBuf[i * 3 + 0] * dTheta,
+        mn, mx,
+      );
+      joints[i].updateWorldMatrix(false, true);
+    }
+  }
+}
+
+function updateLegTargets(legs: LegData[], group: THREE.Object3D, delta: number): void {
+  for (const leg of legs) {
+    leg.stepCooldown = Math.max(leg.stepCooldown - delta, 0);
+    if (!leg.isStepping) continue;
+    leg.stepProgress = Math.min(leg.stepProgress + STEP_SPEED * delta, 1);
+    leg.target.lerpVectors(leg.stepFrom, leg.stepTo, leg.stepProgress);
+    leg.target.y = THREE.MathUtils.lerp(leg.stepFrom.y, leg.stepTo.y, leg.stepProgress)
+      + Math.sin(leg.stepProgress * Math.PI) * STEP_HEIGHT;
+    if (leg.stepProgress >= 1) {
+      leg.target.copy(leg.stepTo);
+      leg.isStepping = false;
+      leg.stepCooldown = STEP_COOLDOWN;
+    }
+  }
+
+  let leftGrounded = 0;
+  let rightGrounded = 0;
+  let leftStepping = false;
+  let rightStepping = false;
+  let bestLeft: LegData | null = null;
+  let bestRight: LegData | null = null;
+  let bestLeftDist = STEP_TRIGGER_DIST_SQ;
+  let bestRightDist = STEP_TRIGGER_DIST_SQ;
+
+  for (const leg of legs) {
+    if (leg.isStepping) {
+      if (leg.isLeft) leftStepping = true;
+      else rightStepping = true;
+      continue;
+    }
+
+    if (leg.isLeft) leftGrounded++;
+    else rightGrounded++;
+
+    if (leg.stepCooldown > 0) continue;
+    group.localToWorld(_stepDesired.copy(leg.homeLocal));
+    _stepDesired.y = leg.groundY;
+    const distSq = _stepDesired.distanceToSquared(leg.target);
+    if (leg.isLeft) {
+      if (distSq > bestLeftDist) {
+        bestLeft = leg;
+        bestLeftDist = distSq;
+      }
+    } else if (distSq > bestRightDist) {
+      bestRight = leg;
+      bestRightDist = distSq;
+    }
+  }
+
+  const startStep = (leg: LegData) => {
+    group.localToWorld(_stepDesired.copy(leg.homeLocal));
+    _stepDesired.y = leg.groundY;
+    _stepLead.subVectors(_stepDesired, leg.prevDesired);
+    if (_stepLead.length() > STEP_MAX_LEAD) _stepLead.setLength(STEP_MAX_LEAD);
+
+    leg.stepFrom.copy(leg.target);
+    leg.stepTo.copy(_stepDesired).addScaledVector(_stepLead, STEP_LEAD);
+    leg.stepTo.y = leg.groundY;
+    leg.stepProgress = 0;
+    leg.isStepping = true;
+    leg.target.copy(leg.stepFrom);
+  };
+
+  if (bestLeft && !leftStepping && leftGrounded > 1) startStep(bestLeft);
+  if (bestRight && !rightStepping && rightGrounded > 1) startStep(bestRight);
+
+  for (const leg of legs) {
+    group.localToWorld(leg.prevDesired.copy(leg.homeLocal));
+    leg.prevDesired.y = leg.groundY;
+  }
 }
 
 // ── Model-only inner component (suspends while GLTF loads) ───────────────────
 function SpiderModel({
   mouseNDC,
 }: {
-  containerRef: React.RefObject<HTMLDivElement | null>;
   mouseNDC: React.RefObject<THREE.Vector2>;
 }) {
   const gltf = useGLTF("/spider.glb");
+  const gl = useThree((s) => s.gl);
   const staticGround = useMemo(() => {
     const source = gltf.scene.getObjectByName("ground") ?? null;
     if (!source) return null;
@@ -194,6 +320,10 @@ function SpiderModel({
   const bodyY       = useRef(0);
   const bodyBaseY   = useRef(0);
   const initDone    = useRef(false);
+  const isMouseGone = useRef(true);
+  const isInactive  = useRef(false);
+  const idleTime    = useRef(0);
+  const idleBlend   = useRef(0);
 
   const BODY_RANGE  = 1.5; // how much up/down cursor moves the body
 
@@ -261,7 +391,7 @@ function SpiderModel({
         // Bend joints (i=2..5): X axis, same range left and right
         const D = Math.PI / 180;
         const perJoint: [number,number][] = [
-          [-30*D,   30*D],   // joint 0 – Z
+          [-60*D,   60*D],   // joint 0 – Z
           [    0,   70*D],   // joint 1 – X
           [-90*D,      0],   // joint 2 – X
           [-90*D,      0],   // joint 3 – X
@@ -273,7 +403,22 @@ function SpiderModel({
       }
 
       if (joints.length === 0) continue;
-      legs.push({ joints, isRoot, isLeft, clamp, target: new THREE.Vector3(), endLocal: new THREE.Vector3() });
+      legs.push({
+        joints,
+        isRoot,
+        isLeft,
+        clamp,
+        target: new THREE.Vector3(),
+        endLocal: new THREE.Vector3(),
+        stepFrom: new THREE.Vector3(),
+        stepTo: new THREE.Vector3(),
+        homeLocal: new THREE.Vector3(),
+        prevDesired: new THREE.Vector3(),
+        groundY: 0,
+        stepProgress: 0,
+        stepCooldown: 0,
+        isStepping: false,
+      });
     }
 
     // ── Measure feet from the GLB's loaded pose (don't reset rotations!) ─
@@ -297,6 +442,11 @@ function SpiderModel({
       leg.endLocal.copy(foot.worldToLocal(contactWorld.clone()));
       leg.target.copy(contactWorld);
       if (floorY !== null) leg.target.y = floorY;
+      leg.groundY = leg.target.y;
+      leg.homeLocal.copy(groupRef.current.worldToLocal(leg.target.clone()));
+      leg.prevDesired.copy(leg.target);
+      leg.stepFrom.copy(leg.target);
+      leg.stepTo.copy(leg.target);
     }
 
     legsRef.current = legs;
@@ -304,22 +454,69 @@ function SpiderModel({
     console.log(`[Spider] IK ready: ${readyRef.current} (${legs.length} legs)`);
   });
 
+  // ── Mouse tracking via canvas bounding rect ───────────────────────────
+  useEffect(() => {
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+    const onMove = (e: MouseEvent) => {
+      const el = gl.domElement;
+      const rect = el.getBoundingClientRect();
+      const inside =
+        e.clientX >= rect.left && e.clientX <= rect.right &&
+        e.clientY >= rect.top  && e.clientY <= rect.bottom;
+      isMouseGone.current = !inside;
+      if (inside) {
+        isInactive.current = false;
+        idleBlend.current = 0;
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => { isInactive.current = true; }, INACTIVITY_DELAY * 1000);
+        mouseNDC.current.set(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -(((e.clientY - rect.top) / rect.height) * 2 - 1),
+        );
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+    };
+  }, [gl, mouseNDC]);
+
   // ── Per-frame IK ──────────────────────────────────────────────────────
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (!readyRef.current || !headRef.current) return;
+
+    // ── Idle state ──────────────────────────────────────────────────────
+    const isIdle = isMouseGone.current || isInactive.current;
+    if (isIdle) {
+      idleBlend.current = Math.min(idleBlend.current + IDLE_BLEND_SPEED * delta, 1);
+      idleTime.current += delta;
+      mouseNDC.current.x = THREE.MathUtils.lerp(mouseNDC.current.x, 0, 0.03);
+      mouseNDC.current.y = THREE.MathUtils.lerp(mouseNDC.current.y, 0, 0.03);
+    } else {
+      idleBlend.current = Math.max(idleBlend.current - IDLE_BLEND_SPEED * delta, 0);
+    }
 
     // Yaw (turn head left/right) — cursor X drives head Z rotation
     const tYaw   = THREE.MathUtils.clamp( mouseNDC.current.x * 0.6,  -0.9,  0.9);
     // Pitch (look up/down) — cursor Y drives head X rotation
-    // Rest pose is -90° (looking straight down).
-    // Cursor at bottom (y<0) → head stays near rest (looking down)
-    // Cursor at top (y>0) → head lifts up to near-level
     const tPitch = THREE.MathUtils.clamp( mouseNDC.current.y * 0.35, -0.08, 0.35);
     // body Y: cursor top → body rises, cursor bottom → body lowers
-    const tBodyY = bodyBaseY.current + mouseNDC.current.y * BODY_RANGE;
-    headYaw.current   = THREE.MathUtils.lerp(headYaw.current,   tYaw,   HEAD_SMOOTH);
-    headPitch.current = THREE.MathUtils.lerp(headPitch.current, tPitch, HEAD_SMOOTH);
-    bodyY.current     = THREE.MathUtils.lerp(bodyY.current,     tBodyY, HEAD_SMOOTH);
+    const tBodyY = bodyBaseY.current + Math.max(mouseNDC.current.y, -0.4) * BODY_RANGE;
+
+    // Idle look-around: slow sine waves blended in
+    const t = idleTime.current;
+    const raw = Math.sin(t * 0.3);
+    const shaped = raw >= 0
+      ? raw * raw * raw
+      : -Math.pow(-raw, 1.2);
+    const jitter = Math.sin(t * 0.73) * 0.04;
+    const idleYaw   = (shaped + jitter) * IDLE_YAW_AMP * idleBlend.current;
+    const idlePitch = Math.sin(t * 0.3 + 1.2) * 0.15 * IDLE_PITCH_AMP * idleBlend.current;
+
+    headYaw.current   = THREE.MathUtils.lerp(headYaw.current,   tYaw + idleYaw,     HEAD_SMOOTH);
+    headPitch.current = THREE.MathUtils.lerp(headPitch.current, tPitch + idlePitch, HEAD_SMOOTH);
+    bodyY.current     = THREE.MathUtils.lerp(bodyY.current,     tBodyY,             HEAD_SMOOTH);
 
     groupRef.current.position.y = bodyY.current;
 
@@ -329,6 +526,7 @@ function SpiderModel({
     headRef.current.rotation.x = -Math.PI / 2 - headPitch.current;
     groupRef.current.updateWorldMatrix(true, true);
 
+    updateLegTargets(legsRef.current, groupRef.current, delta);
     for (const leg of legsRef.current) solveOneLeg(leg);
   });
 
@@ -346,38 +544,14 @@ function SpiderModel({
 export default function SpiderSim() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mouseNDC     = useRef(new THREE.Vector2());
-  const mouseOver    = useRef(false);
-
-  // Mouse tracking — only active while the cursor is over the canvas
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onMove = (e: MouseEvent) => {
-      if (!mouseOver.current) return;
-      const rect = el.getBoundingClientRect();
-      mouseNDC.current.set(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -(((e.clientY - rect.top) / rect.height) * 2 - 1),
-      );
-    };
-    const onEnter = () => { mouseOver.current = true; };
-    const onLeave = () => { mouseOver.current = false; };
-    el.addEventListener("mouseenter", onEnter);
-    el.addEventListener("mouseleave", onLeave);
-    window.addEventListener("mousemove", onMove);
-    return () => {
-      el.removeEventListener("mouseenter", onEnter);
-      el.removeEventListener("mouseleave", onLeave);
-      window.removeEventListener("mousemove", onMove);
-    };
-  }, []);
 
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
       <Canvas
         shadows
-        camera={{ position: [0, 5, 10], fov: 50, near: 0.1, far: 100 }}
-        onCreated={({ camera }) => camera.lookAt(0, 0, -2)}
+        dpr={[1, 1.5]}
+        camera={{ position: [0, 3.5, 11], fov: 42, near: 0.1, far: 100 }}
+        onCreated={({ camera }) => camera.lookAt(0, -0.5, -2)}
         gl={{ antialias: true }}
         style={{ width: "100%", height: "100%" }}
       >
@@ -387,7 +561,7 @@ export default function SpiderSim() {
         <Environment preset="studio" environmentIntensity={0.6} />
 
         {/* Grid — visible immediately, confirms canvas is rendering */}
-        <gridHelper args={[20, 20, "#BBBBBB", "#DDDDDD"]} position={[0, -2.251, 0]} />
+        <gridHelper args={[60, 15, "#BBBBBB", "#DDDDDD"]} position={[0, -2.251, 0]} />
 
         {/* Ground */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.251, 0]} visible={false} receiveShadow>
@@ -397,11 +571,10 @@ export default function SpiderSim() {
 
         {/* ── Spider model — suspends until spider.glb is ready ───────────── */}
         <Suspense fallback={null}>
-          <SpiderModel containerRef={containerRef} mouseNDC={mouseNDC} />
+          <SpiderModel mouseNDC={mouseNDC} />
         </Suspense>
       </Canvas>
     </div>
   );
 }
 
-useGLTF.preload("/spider.glb");

@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { DebugOverlay } from "./DebugOverlay";
+import { PauseButton } from "./sim";
 
 const COLOR_BG = "#F5F5F5";
 
@@ -266,7 +267,6 @@ function Particles({ fpsRef, onLoaded }: {
   );
 }
 
-useGLTF.preload("/ball.glb");
 
 // ── GPU name collector (must live inside Canvas) ──────────────────────────
 function GLInfo({ onInfo }: { onInfo: (gpu: string) => void }) {
@@ -372,6 +372,7 @@ export default function ParticleSim() {
         <Canvas
           key={instanceKey}
           frameloop={paused ? "never" : "always"}
+          dpr={[1, 1.5]}
           orthographic
           camera={{ position: [0, 60, 500], zoom: 1.2, near: 1, far: 10000 }}
           gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.5 }}
@@ -399,12 +400,7 @@ export default function ParticleSim() {
       />
 
       {/* Pause button */}
-      <button
-        onClick={() => setPaused((p) => !p)}
-        className="absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-full border border-[#ccc] bg-white/70 px-4 py-1.5 font-mono text-[0.65rem] uppercase tracking-widest text-[#666] backdrop-blur-sm transition-colors hover:border-[#999] hover:text-[#111]"
-      >
-        {paused ? "▶ Resume" : "⏸ Pause"}
-      </button>
+      <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
     </section>
   );
 }

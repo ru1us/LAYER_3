@@ -2,6 +2,7 @@ import { useRef, Suspense, useState, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
+import { PauseButton, ControlsPanel, SliderRow } from "./sim";
 
 // ── Simulation parameters (exported for external control) ─────────────────
 export interface SimParams {
@@ -323,7 +324,6 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
   const bgParallaxCurrent = useRef(new THREE.Vector2(0, 0));
   const mouseInCanvas = useRef(false);
   const sectionRef    = useRef<HTMLElement>(null);
-  const [loaded, setLoaded] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [shadowEnabled, setShadowEnabled] = useState(false);
@@ -352,23 +352,6 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
     params.current.followSpeed = next;
   }
 
-  // Mount canvas only once section is near viewport (same pattern as ParticleSim)
-  useEffect(() => {
-    if (loaded) return;
-    const check = () => {
-      const el = sectionRef.current;
-      if (!el) return;
-      const top = el.getBoundingClientRect().top;
-      console.log("[FishSim] scroll check – top:", top, "threshold:", window.innerHeight * 1.1);
-      if (top < window.innerHeight * 1.1) {
-        console.log("[FishSim] → mounting canvas");
-        setLoaded(true);
-      }
-    };
-    check();
-    window.addEventListener("scroll", check, { passive: true });
-    return () => window.removeEventListener("scroll", check);
-  }, [loaded]);
 
   useEffect(() => {
     let raf = 0;
@@ -445,108 +428,65 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
       </svg>
 
       {/* Pause button */}
-      <button
-        onClick={() => setPaused((p) => !p)}
-        className="absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-full border border-[#333] bg-[#111]/80 px-4 py-1.5 font-mono text-[0.65rem] uppercase tracking-widest text-[#888] backdrop-blur-sm transition-colors hover:border-[#666] hover:text-[#ccc]"
-      >
-        {paused ? "▶ Resume" : "⏸ Pause"}
-      </button>
+      <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
 
       {/* Controls toggle + panel (overlay) */}
-      <div className="absolute bottom-6 left-1/2 z-30 w-[min(92vw,680px)] -translate-x-1/2">
-        <div className="mx-auto w-fit">
-          {showControls && (
-            <div className="mb-2 rounded-2xl border border-border bg-surface/85 p-6 shadow-lg backdrop-blur-md max-h-[42vh] overflow-y-auto">
-              <div className="grid md:grid-cols-2 gap-4">
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
-                    <span>Max Bend</span>
-                    <span>{maxBendDeg.toFixed(0)}°</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={10}
-                    max={90}
-                    step={1}
-                    value={maxBendDeg}
-                    onChange={(e) => updateMaxBendDeg(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </label>
+      <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
+        <div className="grid md:grid-cols-2 gap-4">
+          <SliderRow
+            label="Max Bend"
+            value={maxBendDeg}
+            display={`${maxBendDeg.toFixed(0)}°`}
+            min={10}
+            max={90}
+            step={1}
+            onChange={updateMaxBendDeg}
+          />
+          <SliderRow
+            label="Orbit Radius"
+            value={orbitRadius}
+            display={orbitRadius.toFixed(2)}
+            min={0.8}
+            max={3}
+            step={0.01}
+            onChange={updateOrbitRadius}
+          />
+          <SliderRow
+            label="Force Strength"
+            value={forceStrength}
+            display={forceStrength.toFixed(2)}
+            min={0.3}
+            max={2}
+            step={0.01}
+            onChange={updateForceStrength}
+          />
+          <SliderRow
+            label="Follow Speed"
+            value={followSpeed}
+            display={followSpeed.toFixed(2)}
+            min={0.05}
+            max={1}
+            step={0.01}
+            onChange={updateFollowSpeed}
+          />
 
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
-                    <span>Orbit Radius</span>
-                    <span>{orbitRadius.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0.8}
-                    max={3}
-                    step={0.01}
-                    value={orbitRadius}
-                    onChange={(e) => updateOrbitRadius(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </label>
-
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
-                    <span>Force Strength</span>
-                    <span>{forceStrength.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0.3}
-                    max={2}
-                    step={0.01}
-                    value={forceStrength}
-                    onChange={(e) => updateForceStrength(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </label>
-
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">
-                    <span>Follow Speed</span>
-                    <span>{followSpeed.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0.05}
-                    max={1}
-                    step={0.01}
-                    value={followSpeed}
-                    onChange={(e) => updateFollowSpeed(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </label>
-
-                <div className="md:col-span-2 mt-1 flex items-center justify-between rounded-lg border border-border px-4 py-3">
-                  <span className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-text-muted">Ground Shadow</span>
-                  <button
-                    onClick={() => setShadowEnabled((v) => !v)}
-                    className={`rounded-full border px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.14em] transition-colors ${shadowEnabled ? "border-text text-text" : "border-border text-text-muted hover:text-text"}`}
-                  >
-                    {shadowEnabled ? "On" : "Off"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowControls((v) => !v)}
-            className="flex items-center gap-3 rounded-full border border-border px-6 py-3 font-mono text-[0.7rem] uppercase tracking-[0.16em] text-text-muted backdrop-blur-sm transition-colors hover:text-text"
-          >
-            <span>Simulation Controls</span>
-            <span className="font-doto text-lg leading-none">{showControls ? "−" : "+"}</span>
-          </button>
+          <div className="md:col-span-2 mt-1 flex items-center justify-between rounded-lg border border-[#2a2a2a] px-4 py-3">
+            <span className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-[#888]">Ground Shadow</span>
+            <button
+              onClick={() => setShadowEnabled((v) => !v)}
+              className={`rounded-full border px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.14em] transition-colors ${
+                shadowEnabled
+                  ? "border-accent text-accent"
+                  : "border-[#444] text-[#777] hover:text-accent hover:border-accent"
+              }`}
+            >
+              {shadowEnabled ? "On" : "Off"}
+            </button>
+          </div>
         </div>
-      </div>
+      </ControlsPanel>
 
-      {loaded && (
-        <div style={{ filter: "url(#water-distort)" }} className="relative z-10 w-full h-full">
+      <div style={{ filter: "url(#water-distort)" }} className="relative z-10 w-full h-full">
           {/* Background title with subtle parallax */}
           <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
             <div className="absolute inset-0 flex items-center justify-center px-8">
@@ -573,6 +513,7 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           />
           <Canvas
           frameloop={paused ? "never" : "always"}
+          dpr={[1, 1.5]}
           orthographic
           shadows={shadowEnabled}
           camera={{ position: [0, 200, 0], zoom: 80, near: 1, far: 1000 }}
@@ -610,7 +551,6 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           </Suspense>
         </Canvas>
         </div>
-      )}
       </section>
     </div>
   );
