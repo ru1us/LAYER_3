@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
+import { useSettings } from "./SettingsContext";
+import { GlobalStatsOverlay } from "./CanvasStats";
 
 export default function Layout() {
   const location = useLocation();
+  const { quality, setQuality, showStats, toggleStats } = useSettings();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [navVisible, setNavVisible] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -113,6 +116,60 @@ export default function Layout() {
               >
                 Styleguide
               </Link>
+
+              {/* ── Settings ─────────────────────────────────────────── */}
+              <div className="mt-1 border-t border-border pt-2">
+                {/* Render quality */}
+                <div className="flex items-center justify-between gap-4 px-6 py-2">
+                  <span className="font-mono text-[0.7rem] uppercase tracking-nav text-text-muted">
+                    Render Quality
+                  </span>
+                  <div className="flex rounded-full border border-border p-0.5">
+                    <button
+                      onClick={() => setQuality("high")}
+                      className={`rounded-full px-3 py-1 font-mono text-[0.6rem] uppercase tracking-nav transition-colors ${
+                        quality === "high"
+                          ? "bg-text text-bg"
+                          : "text-text-muted hover:text-text"
+                      }`}
+                    >
+                      High
+                    </button>
+                    <button
+                      onClick={() => setQuality("performance")}
+                      className={`rounded-full px-3 py-1 font-mono text-[0.6rem] uppercase tracking-nav transition-colors ${
+                        quality === "performance"
+                          ? "bg-text text-bg"
+                          : "text-text-muted hover:text-text"
+                      }`}
+                    >
+                      Perf
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sys display */}
+                <div className="flex items-center justify-between gap-4 px-6 py-2">
+                  <span className="font-mono text-[0.7rem] uppercase tracking-nav text-text-muted">
+                    Sys Display
+                  </span>
+                  <button
+                    onClick={toggleStats}
+                    className={`flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[0.6rem] uppercase tracking-nav transition-colors ${
+                      showStats
+                        ? "border-accent text-accent"
+                        : "border-border text-text-muted hover:text-text"
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full transition-colors ${
+                        showStats ? "bg-accent" : "bg-text-muted/50"
+                      }`}
+                    />
+                    {showStats ? "On" : "Off"}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -129,6 +186,9 @@ export default function Layout() {
             impressum | data privacy | contact:
         </p>
       </footer>
+
+      {/* ── Site-wide sys overlay ────────────── */}
+      <GlobalStatsOverlay />
     </div>
   );
 }

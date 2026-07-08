@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Physics, RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
 import * as THREE from "three";
 import { BallModel } from "./BallModel";
-import { PauseButton } from "./sim";
+import { PauseButton, ControlsPanel, SliderRow } from "./sim";
+import { useSettings } from "./SettingsContext";
+import { CanvasStatsReporter } from "./CanvasStats";
 
 const COLOR_BG = "#F5F5F5";
 
@@ -40,6 +42,17 @@ const DEFAULT_TARGET    = new THREE.Vector3(-0.5, 0.1, 0.25);
 const IDLE_BLEND_SPEED  = 0.6; // ramp speed for idle in/out
 const IDLE_BASE_AMP     = 0.3; // how much the base sweeps in radians // default rest pose
 
+interface RobotParams {
+  targetSmooth: number;
+  jointFollow: number;
+  idleLean: number;
+}
+
+const DEFAULT_ROBOT_PARAMS: RobotParams = {
+  targetSmooth: TARGET_SMOOTH,
+  jointFollow: 1,
+  idleLean: IDLE_BASE_AMP,
+};
 
 const BONE_CONFIG: Record<string, BoneConfig> = {
   // Base turntable
@@ -57,7 +70,7 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
   "endeffector": { axis: "z", min: -Infinity, max: Infinity },
 };
 
-function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null> }) {
+function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high, params }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null>; high: boolean; params: React.MutableRefObject<RobotParams> }) {
   const gltf = useGLTF("/robot2.glb");
   const { scene, camera, size, gl } = useThree();
   const glbCamApplied = useRef(false);
@@ -116,26 +129,40 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
       }
     }
 
-    // ── Apply roughness map texture to all materials ──────────────────────────
-    const textureLoader = new THREE.TextureLoader();
+    // ── Apply roughness map texture to all materials (high quality only) ───────
     const ROBOT_GROUND_CLIP = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    textureLoader.load("/metalroughness.png", (roughnessTexture) => {
-      roughnessTexture.colorSpace = THREE.SRGBColorSpace;
+    if (high) {
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.load("/metalroughness.png", (roughnessTexture) => {
+        roughnessTexture.colorSpace = THREE.SRGBColorSpace;
+        gltf.scene.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          if (mesh.isMesh && mesh.material) {
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((mat) => {
+              if ("roughness" in mat) {
+                (mat as any).roughnessMap = roughnessTexture;
+                (mat as any).roughness = 1.0;
+              }
+              (mat as any).clippingPlanes = [ROBOT_GROUND_CLIP];
+              mat.needsUpdate = true;
+            });
+          }
+        });
+      });
+    } else {
+      // Performance: no roughness map, keep clipping planes for the ground cut.
       gltf.scene.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         if (mesh.isMesh && mesh.material) {
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
           materials.forEach((mat) => {
-            if ("roughness" in mat) {
-              (mat as any).roughnessMap = roughnessTexture;
-              (mat as any).roughness = 1.0;
-            }
             (mat as any).clippingPlanes = [ROBOT_GROUND_CLIP];
             mat.needsUpdate = true;
           });
         }
       });
-    });
+    }
 
     // ── Find bone chain ──────────────────────────────────────────────────────
     const nameMap = new Map<string, THREE.Object3D>();
@@ -177,7 +204,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
         setTimeout(() => setupBoneConfig(), 0);
       }
     }
-  }, [gltf, scene, camera]);
+  }, [gltf, scene, camera, high]);
 
   useEffect(() => {
     let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -337,7 +364,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
 
     if (!smoothInitialized.current) { smoothTarget.current.copy(v.target); smoothInitialized.current = true; }
     if (!isRestMode.current) {
-      smoothTarget.current.lerp(v.target, TARGET_SMOOTH);
+      smoothTarget.current.lerp(v.target, params.current.targetSmooth);
       smoothTarget.current.y = Math.max(smoothTarget.current.y, 0);
     }
 
@@ -372,7 +399,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
           ? raw * raw * raw
           : -Math.pow(-raw, 1.2);
         const jitter = Math.sin(t * 0.73) * 0.04;
-        const idleSweep = (shaped + jitter) * IDLE_BASE_AMP * idleBlend.current;
+        const idleSweep = (shaped + jitter) * params.current.idleLean * idleBlend.current;
         base.rotation[baseConfig.axis] += idleSweep;
       }
       base.updateWorldMatrix(true, true);
@@ -430,9 +457,10 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
       const cfg   = boneConfigRef.current.get(joint);
       if (!cfg) continue;
 
+      const baseSpeed = (BONE_FOLLOW[joint.name] ?? 0.06) * params.current.jointFollow;
       const speed   = isInactive.current
-        ? Math.min((BONE_FOLLOW[joint.name] ?? 0.06) * 4, 1)
-        : (BONE_FOLLOW[joint.name] ?? 0.06);
+        ? Math.min(baseSpeed * 4, 1)
+        : Math.min(baseSpeed, 1);
       const current = _savedAngles.current[idx];
       let goal      = _goalAngles.current[idx];
 
@@ -462,8 +490,19 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef }: { 
 
   return (
     <>
-      <Environment preset="studio" environmentIntensity={0.6} />
-      <ambientLight intensity={0.01} color="#ffffff" />
+      {/* High quality: image-based studio env. Performance: cheap analytic lights. */}
+      {high ? (
+        <>
+          <Environment preset="studio" environmentIntensity={0.6} />
+          <ambientLight intensity={0.01} color="#ffffff" />
+        </>
+      ) : (
+        <>
+          <ambientLight intensity={0.7} color="#ffffff" />
+          <hemisphereLight intensity={0.9} color="#ffffff" groundColor="#cccccc" />
+          <directionalLight position={[5, 8, 5]} intensity={1.1} color="#ffffff" />
+        </>
+      )}
       <primitive object={gltf.scene} />
     </>
   );
@@ -498,7 +537,8 @@ function HoleMarker({ position }: { position: THREE.Vector3 }) {
   );
 }
 
-const MAX_BALLS = 6;
+const MAX_BALLS_HIGH = 6;
+const MAX_BALLS_PERF = 3;
 
 function InteractiveBall({
   eeWorldPos,
@@ -632,9 +672,11 @@ function InteractiveBall({
 function BallSpawner({
   eeWorldPos,
   mouseDown,
+  maxBalls,
 }: {
   eeWorldPos: React.RefObject<THREE.Vector3>;
   mouseDown: React.RefObject<boolean>;
+  maxBalls: number;
 }) {
   const [firstId] = useState(() => Date.now());
   const [balls, setBalls] = useState<number[]>([firstId]);
@@ -646,20 +688,20 @@ function BallSpawner({
     const newId = Date.now() + Math.random();
     setBalls(prev => {
       const next = [...prev, newId];
-      return next.length > MAX_BALLS ? next.slice(next.length - MAX_BALLS) : next;
+      return next.length > maxBalls ? next.slice(next.length - maxBalls) : next;
     });
     setActiveId(newId);
-  }, []);
+  }, [maxBalls]);
 
   const handleOffscreen = useCallback((id: number) => {
     const newId = Date.now() + Math.random();
     setBalls(prev => {
       const without = prev.filter(b => b !== id);
       const next = [...without, newId];
-      return next.length > MAX_BALLS ? next.slice(next.length - MAX_BALLS) : next;
+      return next.length > maxBalls ? next.slice(next.length - maxBalls) : next;
     });
     setActiveId(newId);
-  }, []);
+  }, [maxBalls]);
 
   const handleScored = useCallback(() => {
     const newHole = randomHolePos();
@@ -687,12 +729,20 @@ function BallSpawner({
 }
 
 export default function HeroRobot() {
+  const { profile } = useSettings();
   const eeWorldPos = useRef(new THREE.Vector3());
   const baseWorldPos = useRef(new THREE.Vector3());
   const mouseDown = useRef(false);
   const crosshairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const params = useRef<RobotParams>({ ...DEFAULT_ROBOT_PARAMS });
   const [paused, setPaused] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const [targetSmooth, setTargetSmooth] = useState(params.current.targetSmooth);
+  const [jointFollow, setJointFollow] = useState(params.current.jointFollow);
+  const [idleLean, setIdleLean] = useState(params.current.idleLean);
+
+  const maxBalls = profile.high ? MAX_BALLS_HIGH : MAX_BALLS_PERF;
 
   useEffect(() => {
     const down = () => { mouseDown.current = true; };
@@ -709,17 +759,18 @@ export default function HeroRobot() {
     <div ref={containerRef} className="w-full h-full cursor-none">
       <Canvas
         frameloop={paused ? "never" : "always"}
-        dpr={[1, 1.5]}
+        dpr={profile.dpr}
         camera={{ position: [4, 3, 5], fov: 45, near: 0.1, far: 500 }}
         gl={{
-          antialias: true,
+          antialias: profile.antialias,
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: .8,
           localClippingEnabled: true,
         }}
       >
+        <CanvasStatsReporter />
         <Physics gravity={[0, -9.81, 0]}>
-          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} />
+          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} high={profile.high} params={params} />
           {/* Grid floor */}
           <gridHelper args={[10, 10, "#BBBBBB", "#DDDDDD"]} position={[0, 0, 0]} />
           {/* Ground collider – cut at back edge so balls roll off */}
@@ -727,6 +778,7 @@ export default function HeroRobot() {
           <BallSpawner
             eeWorldPos={eeWorldPos}
             mouseDown={mouseDown}
+            maxBalls={maxBalls}
           />
         </Physics>
       </Canvas>
@@ -744,6 +796,47 @@ export default function HeroRobot() {
           <circle cx="14" cy="14" r="2.5" stroke="#111111" strokeWidth="1.5" />
         </svg>
       </div>
+
+      <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
+        <div className="grid md:grid-cols-3 gap-4">
+          <SliderRow
+            label="Target Smooth"
+            value={targetSmooth}
+            display={targetSmooth.toFixed(2)}
+            min={0.02}
+            max={0.25}
+            step={0.01}
+            onChange={(v) => {
+              setTargetSmooth(v);
+              params.current.targetSmooth = v;
+            }}
+          />
+          <SliderRow
+            label="Joint Follow"
+            value={jointFollow}
+            display={`${jointFollow.toFixed(1)}×`}
+            min={0.4}
+            max={3}
+            step={0.1}
+            onChange={(v) => {
+              setJointFollow(v);
+              params.current.jointFollow = v;
+            }}
+          />
+          <SliderRow
+            label="Idle Lean"
+            value={idleLean}
+            display={`${((idleLean * 180) / Math.PI).toFixed(0)}°`}
+            min={0}
+            max={0.8}
+            step={0.01}
+            onChange={(v) => {
+              setIdleLean(v);
+              params.current.idleLean = v;
+            }}
+          />
+        </div>
+      </ControlsPanel>
 
       {/* Pause button */}
       <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />

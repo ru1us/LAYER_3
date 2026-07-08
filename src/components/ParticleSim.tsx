@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useRef, Suspense, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, Suspense, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { DebugOverlay } from "./DebugOverlay";
-import { PauseButton } from "./sim";
+import { PauseButton, ControlsPanel, SliderRow } from "./sim";
+import { useSettings } from "./SettingsContext";
+import { CanvasStatsReporter } from "./CanvasStats";
 
 const COLOR_BG = "#F5F5F5";
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const BALL_COUNT = 200;
+// Ball count is quality-dependent: the ball–ball collision pass is O(n²), so
+// performance mode drops this dramatically.
+const BALL_COUNT_HIGH = 200;
+const BALL_COUNT_PERF = 70;
 const BALL_RADIUS = 30;           // physics collision radius (world units)
 const BALL_SCALE  = BALL_RADIUS;  // render scale – assumes GLB native radius ≈ 1
 const DIAMETER   = BALL_RADIUS * 2;
@@ -23,6 +27,18 @@ const FLOOR_Y     = -270;
 const CEIL_Y      = 300;
 const RESTITUTION = 0.78;
 
+interface ParticleParams {
+  gravity: number;
+  repulsionRadius: number;
+  repulsionStrength: number;
+}
+
+const DEFAULT_PARTICLE_PARAMS: ParticleParams = {
+  gravity: GRAVITY,
+  repulsionRadius: REPULSION_RADIUS,
+  repulsionStrength: REPULSION_STRENGTH,
+};
+
 // ── Per-ball state (full 3-D) ──────────────────────────────────────────────
 interface Ball {
   x: number; y: number; z: number;
@@ -32,9 +48,10 @@ interface Ball {
 }
 
 // ── Inner scene ───────────────────────────────────────────────────────────
-function Particles({ fpsRef, onLoaded }: {
-  fpsRef: React.MutableRefObject<number>;
-  onLoaded: () => void;
+function Particles({ count, high, params }: {
+  count: number;
+  high: boolean;
+  params: React.MutableRefObject<ParticleParams>;
 }) {
   const { camera, gl } = useThree();
   const { scene: ballScene } = useGLTF("/ball.glb");
@@ -55,31 +72,33 @@ function Particles({ fpsRef, onLoaded }: {
     // Cast needed: TS loses the narrowed type after the traverse callback
     const src = srcMat as THREE.MeshStandardMaterial | null;
 
-    const mat = new THREE.MeshPhysicalMaterial({
-      // Inherit everything from the GLB material
-      map:          src?.map          ?? null,
+    // Performance mode uses a plain MeshStandardMaterial with no textures
+    // (flat color only); high quality inherits the GLB maps and adds a
+    // felt-like sheen on top via MeshPhysicalMaterial (an expensive shader).
+    const base = {
+      map:          high ? (src?.map          ?? null) : null,
       color:        src?.color        ?? new THREE.Color("#ffffff"),
       roughness:    src?.roughness    ?? 0.9,
       metalness:    src?.metalness    ?? 0.0,
-      normalMap:    src?.normalMap    ?? null,
-      roughnessMap: src?.roughnessMap ?? null,
-      // Add felt-like sheen on top
-      sheen:        1.0,
-      sheenRoughness: 0.8,
-      sheenColor:   new THREE.Color("#ffffff"),
-    });
+      normalMap:    high ? (src?.normalMap    ?? null) : null,
+      roughnessMap: high ? (src?.roughnessMap ?? null) : null,
+    };
+
+    const mat = high
+      ? new THREE.MeshPhysicalMaterial({
+          ...base,
+          sheen:          1.0,
+          sheenRoughness: 0.8,
+          sheenColor:     new THREE.Color("#ffffff"),
+        })
+      : new THREE.MeshStandardMaterial(base);
 
     return { geom, mat };
-  }, [ballScene]);
+  }, [ballScene, high]);
 
   const meshRef   = useRef<THREE.InstancedMesh>(null);
   const balls     = useRef<Ball[]>([]);
   const mouseNDC  = useRef(new THREE.Vector2(99999, 99999));
-
-  // FPS tracking
-  const _frameCount   = useRef(0);
-  const _lastFpsTime  = useRef(performance.now());
-  const _loadedFired  = useRef(false);
 
   // Reusable scratch objects — no per-frame allocation
   const dummy      = useRef(new THREE.Object3D());
@@ -90,7 +109,7 @@ function Particles({ fpsRef, onLoaded }: {
   // Initialise balls above the ceiling with a staggered spawn delay
   useEffect(() => {
     const now = performance.now();
-    balls.current = Array.from({ length: BALL_COUNT }, (_, i) => ({
+    balls.current = Array.from({ length: count }, (_, i) => ({
       x:  (Math.random() - 0.5) * BOUNDS_X * 2,
       y:  CEIL_Y + BALL_RADIUS + Math.random() * 200, // tight band just above
       z:  (Math.random() - 0.5) * BOUNDS_Z * 2,
@@ -100,7 +119,7 @@ function Particles({ fpsRef, onLoaded }: {
       rz: Math.random() * Math.PI * 2,
       spawnAt: now + i * 30, // one new ball every 30 ms
     }));
-  }, []);
+  }, [count]);
 
   // Track mouse NDC + speed (px/ms, EMA-smoothed)
   const mouseMovedAt  = useRef(0);
@@ -152,14 +171,15 @@ function Particles({ fpsRef, onLoaded }: {
       : 0;
 
     const bs = balls.current;
+    const n  = bs.length;
 
     // ── Per-ball: gravity + mouse repulsion + integrate ──────────────────
-    for (let i = 0; i < BALL_COUNT; i++) {
+    for (let i = 0; i < n; i++) {
       const b = bs[i];
       if (now < b.spawnAt) continue; // not yet released
 
       // Gravity
-      b.vy -= GRAVITY;
+      b.vy -= params.current.gravity;
 
       // 3-D mouse repulsion scaled by how fast the mouse is moving
       if (speedFactor > 0.01) {
@@ -169,8 +189,8 @@ function Particles({ fpsRef, onLoaded }: {
         const dy = b.y - _closest.current.y;
         const dz = b.z - _closest.current.z;
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist < REPULSION_RADIUS && dist > 0.001) {
-          const force = ((REPULSION_RADIUS - dist) / REPULSION_RADIUS) * REPULSION_STRENGTH * speedFactor;
+        if (dist < params.current.repulsionRadius && dist > 0.001) {
+          const force = ((params.current.repulsionRadius - dist) / params.current.repulsionRadius) * params.current.repulsionStrength * speedFactor;
           b.vx += (dx / dist) * force;
           b.vy += (dy / dist) * force;
           b.vz += (dz / dist) * force;
@@ -195,10 +215,10 @@ function Particles({ fpsRef, onLoaded }: {
     }
 
     // ── Ball–ball 3-D collision pass ─────────────────────────────────────
-    for (let i = 0; i < BALL_COUNT - 1; i++) {
+    for (let i = 0; i < n - 1; i++) {
       const a = bs[i];
       if (now < a.spawnAt) continue;
-      for (let j = i + 1; j < BALL_COUNT; j++) {
+      for (let j = i + 1; j < n; j++) {
         const b = bs[j];
         if (now < b.spawnAt) continue;
         const dx = b.x - a.x;
@@ -228,7 +248,7 @@ function Particles({ fpsRef, onLoaded }: {
     }
 
     // ── Upload matrices ──────────────────────────────────────────────────
-    for (let i = 0; i < BALL_COUNT; i++) {
+    for (let i = 0; i < n; i++) {
       const b = bs[i];      // Hide balls that haven't spawned yet (scale to 0)
       if (now < b.spawnAt) {
         dummy.current.position.set(0, -99999, 0);
@@ -244,54 +264,32 @@ function Particles({ fpsRef, onLoaded }: {
       meshRef.current.setMatrixAt(i, dummy.current.matrix);
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
-
-    // ── FPS + first-frame callback ────────────────────────────────────
-    if (!_loadedFired.current) { _loadedFired.current = true; onLoaded(); }
-    _frameCount.current++;
-    const fpsNow = performance.now();
-    const fpsElapsed = fpsNow - _lastFpsTime.current;
-    if (fpsElapsed >= 500) {
-      fpsRef.current = (_frameCount.current / fpsElapsed) * 1000;
-      _frameCount.current = 0;
-      _lastFpsTime.current = fpsNow;
-    }
   });
 
   if (!geom || !mat) return null;
 
   return (
     <>
-      <instancedMesh ref={meshRef} args={[geom, mat, BALL_COUNT]} frustumCulled={false} />
+      <instancedMesh key={count} ref={meshRef} args={[geom, mat, count]} frustumCulled={false} />
 
     </>
   );
 }
 
 
-// ── GPU name collector (must live inside Canvas) ──────────────────────────
-function GLInfo({ onInfo }: { onInfo: (gpu: string) => void }) {
-  const { gl } = useThree();
-  useEffect(() => {
-    const ctx = gl.getContext() as WebGLRenderingContext;
-    const ext = ctx.getExtension("WEBGL_debug_renderer_info");
-    const name = ext
-      ? (ctx.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string).replace(/\(.*?\)/g, "").trim()
-      : "Unknown GPU";
-    onInfo(name);
-  }, [gl, onInfo]);
-  return null;
-}
-
 // ── Public component ───────────────────────────────────────────────────────
 export default function ParticleSim() {
+  const { profile } = useSettings();
   const sectionRef   = useRef<HTMLElement>(null);
   const [loaded, setLoaded]       = useState(false);
-  const [instanceKey, setInstanceKey] = useState(0);
-  const [loadTime, setLoadTime]   = useState<number | null>(null);
-  const [gpu, setGpu]             = useState<string | null>(null);
   const [paused, setPaused]       = useState(false);
-  const loadStartRef = useRef(0);
-  const fpsRef       = useRef(0);
+  const [showControls, setShowControls] = useState(false);
+  const params = useRef<ParticleParams>({ ...DEFAULT_PARTICLE_PARAMS });
+  const [gravity, setGravity] = useState(params.current.gravity);
+  const [repulsionRadius, setRepulsionRadius] = useState(params.current.repulsionRadius);
+  const [repulsionStrength, setRepulsionStrength] = useState(params.current.repulsionStrength);
+
+  const ballCount = profile.high ? BALL_COUNT_HIGH : BALL_COUNT_PERF;
 
   // ── Custom cursor dot ────────────────────────────────────────────────────
   const dotRef = useRef<HTMLDivElement>(null);
@@ -316,19 +314,6 @@ export default function ParticleSim() {
     section.addEventListener('mouseleave', onLeave);
     return () => { section.removeEventListener('mousemove', onMove); section.removeEventListener('mouseleave', onLeave); clearTimeout(timer); };
   }, []);
-
-  const handleLoaded = useCallback(() => {
-    setLoadTime(performance.now() - loadStartRef.current);
-  }, []);
-
-  const handleReload = useCallback(() => {
-    loadStartRef.current = performance.now();
-    setLoadTime(null);
-    fpsRef.current = 0;
-    setInstanceKey((k) => k + 1);
-  }, []);
-
-  const handleGpu = useCallback((name: string) => setGpu(name), []);
 
   // Mount (and start) the sim when the section scrolls close to the viewport
   useEffect(() => {
@@ -370,34 +355,64 @@ export default function ParticleSim() {
 
       {loaded && (
         <Canvas
-          key={instanceKey}
           frameloop={paused ? "never" : "always"}
-          dpr={[1, 1.5]}
+          dpr={profile.dpr}
           orthographic
           camera={{ position: [0, 60, 500], zoom: 1.2, near: 1, far: 10000 }}
-          gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.5 }}
+          gl={{ antialias: profile.antialias, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.5 }}
           className="w-full h-full"
           onCreated={({ camera, gl }) => { camera.lookAt(0, -30, 0); gl.setClearColor(COLOR_BG); }}
         >
           <ambientLight intensity={0.8} />
           <directionalLight position={[30, 120, 90]} intensity={2.2} color="#f3ff71" castShadow={false} />
           <pointLight position={[-60, 90, 60]} intensity={1.0} color="#E8FF00" />
-          <GLInfo onInfo={handleGpu} />
+          <CanvasStatsReporter />
           <Suspense fallback={null}>
-            <Particles fpsRef={fpsRef} onLoaded={handleLoaded} />
+            <Particles count={ballCount} high={profile.high} params={params} />
           </Suspense>
         </Canvas>
       )}
 
-      <DebugOverlay
-        fpsRef={fpsRef}
-        loadTimeMs={loadTime}
-        onReload={handleReload}
-        stats={[
-          { label: "PARTICLES", value: BALL_COUNT },
-          { label: "GPU", value: gpu ?? "—" },
-        ]}
-      />
+      <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
+        <div className="grid md:grid-cols-3 gap-4">
+          <SliderRow
+            label="Gravity"
+            value={gravity}
+            display={gravity.toFixed(2)}
+            min={0}
+            max={0.8}
+            step={0.01}
+            onChange={(v) => {
+              setGravity(v);
+              params.current.gravity = v;
+            }}
+          />
+          <SliderRow
+            label="Repel Radius"
+            value={repulsionRadius}
+            display={repulsionRadius.toFixed(0)}
+            min={60}
+            max={320}
+            step={5}
+            onChange={(v) => {
+              setRepulsionRadius(v);
+              params.current.repulsionRadius = v;
+            }}
+          />
+          <SliderRow
+            label="Repel Force"
+            value={repulsionStrength}
+            display={repulsionStrength.toFixed(1)}
+            min={0.5}
+            max={10}
+            step={0.1}
+            onChange={(v) => {
+              setRepulsionStrength(v);
+              params.current.repulsionStrength = v;
+            }}
+          />
+        </div>
+      </ControlsPanel>
 
       {/* Pause button */}
       <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />

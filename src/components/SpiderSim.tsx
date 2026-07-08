@@ -24,7 +24,10 @@
 
 import { useGLTF, Environment } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSettings } from "./SettingsContext";
+import { CanvasStatsReporter } from "./CanvasStats";
+import { ControlsPanel, SliderRow } from "./sim";
 import * as THREE from "three";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -38,12 +41,25 @@ const IDLE_BLEND_SPEED = 0.6;
 const IDLE_YAW_AMP     = 0.45;
 const IDLE_PITCH_AMP   = 0.2;
 const STEP_TRIGGER_DIST = 0.24;
-const STEP_TRIGGER_DIST_SQ = STEP_TRIGGER_DIST * STEP_TRIGGER_DIST;
 const STEP_HEIGHT = 0.34;
 const STEP_SPEED = 1.8;
 const STEP_COOLDOWN = 0.4;
 const STEP_LEAD = 1.6;
 const STEP_MAX_LEAD = 0.18;
+
+interface SpiderParams {
+  headSmooth: number;
+  bodyLean: number;
+  stepDistance: number;
+  stepHeight: number;
+}
+
+const DEFAULT_SPIDER_PARAMS: SpiderParams = {
+  headSmooth: HEAD_SMOOTH,
+  bodyLean: 1.5,
+  stepDistance: STEP_TRIGGER_DIST,
+  stepHeight: STEP_HEIGHT,
+};
 
 const LEG_NAMES = ["L1", "L2", "L3", "L4", "R1", "R2", "R3", "R4"] as const;
 
@@ -218,14 +234,14 @@ function solveOneLeg(leg: LegData): void {
   }
 }
 
-function updateLegTargets(legs: LegData[], group: THREE.Object3D, delta: number): void {
+function updateLegTargets(legs: LegData[], group: THREE.Object3D, delta: number, params: SpiderParams): void {
   for (const leg of legs) {
     leg.stepCooldown = Math.max(leg.stepCooldown - delta, 0);
     if (!leg.isStepping) continue;
     leg.stepProgress = Math.min(leg.stepProgress + STEP_SPEED * delta, 1);
     leg.target.lerpVectors(leg.stepFrom, leg.stepTo, leg.stepProgress);
     leg.target.y = THREE.MathUtils.lerp(leg.stepFrom.y, leg.stepTo.y, leg.stepProgress)
-      + Math.sin(leg.stepProgress * Math.PI) * STEP_HEIGHT;
+      + Math.sin(leg.stepProgress * Math.PI) * params.stepHeight;
     if (leg.stepProgress >= 1) {
       leg.target.copy(leg.stepTo);
       leg.isStepping = false;
@@ -239,8 +255,9 @@ function updateLegTargets(legs: LegData[], group: THREE.Object3D, delta: number)
   let rightStepping = false;
   let bestLeft: LegData | null = null;
   let bestRight: LegData | null = null;
-  let bestLeftDist = STEP_TRIGGER_DIST_SQ;
-  let bestRightDist = STEP_TRIGGER_DIST_SQ;
+  const stepTriggerDistSq = params.stepDistance * params.stepDistance;
+  let bestLeftDist = stepTriggerDistSq;
+  let bestRightDist = stepTriggerDistSq;
 
   for (const leg of legs) {
     if (leg.isStepping) {
@@ -293,8 +310,10 @@ function updateLegTargets(legs: LegData[], group: THREE.Object3D, delta: number)
 // ── Model-only inner component (suspends while GLTF loads) ───────────────────
 function SpiderModel({
   mouseNDC,
+  params,
 }: {
   mouseNDC: React.RefObject<THREE.Vector2>;
+  params: React.MutableRefObject<SpiderParams>;
 }) {
   const gltf = useGLTF("/spider.glb");
   const gl = useThree((s) => s.gl);
@@ -324,8 +343,6 @@ function SpiderModel({
   const isInactive  = useRef(false);
   const idleTime    = useRef(0);
   const idleBlend   = useRef(0);
-
-  const BODY_RANGE  = 1.5; // how much up/down cursor moves the body
 
   // ── First-frame init (world matrices are valid inside useFrame) ────────
   useFrame(() => {
@@ -502,7 +519,7 @@ function SpiderModel({
     // Pitch (look up/down) — cursor Y drives head X rotation
     const tPitch = THREE.MathUtils.clamp( mouseNDC.current.y * 0.35, -0.08, 0.35);
     // body Y: cursor top → body rises, cursor bottom → body lowers
-    const tBodyY = bodyBaseY.current + Math.max(mouseNDC.current.y, -0.4) * BODY_RANGE;
+    const tBodyY = bodyBaseY.current + Math.max(mouseNDC.current.y, -0.4) * params.current.bodyLean;
 
     // Idle look-around: slow sine waves blended in
     const t = idleTime.current;
@@ -514,9 +531,9 @@ function SpiderModel({
     const idleYaw   = (shaped + jitter) * IDLE_YAW_AMP * idleBlend.current;
     const idlePitch = Math.sin(t * 0.3 + 1.2) * 0.15 * IDLE_PITCH_AMP * idleBlend.current;
 
-    headYaw.current   = THREE.MathUtils.lerp(headYaw.current,   tYaw + idleYaw,     HEAD_SMOOTH);
-    headPitch.current = THREE.MathUtils.lerp(headPitch.current, tPitch + idlePitch, HEAD_SMOOTH);
-    bodyY.current     = THREE.MathUtils.lerp(bodyY.current,     tBodyY,             HEAD_SMOOTH);
+    headYaw.current   = THREE.MathUtils.lerp(headYaw.current,   tYaw + idleYaw,     params.current.headSmooth);
+    headPitch.current = THREE.MathUtils.lerp(headPitch.current, tPitch + idlePitch, params.current.headSmooth);
+    bodyY.current     = THREE.MathUtils.lerp(bodyY.current,     tBodyY,             params.current.headSmooth);
 
     groupRef.current.position.y = bodyY.current;
 
@@ -526,7 +543,7 @@ function SpiderModel({
     headRef.current.rotation.x = -Math.PI / 2 - headPitch.current;
     groupRef.current.updateWorldMatrix(true, true);
 
-    updateLegTargets(legsRef.current, groupRef.current, delta);
+    updateLegTargets(legsRef.current, groupRef.current, delta, params.current);
     for (const leg of legsRef.current) solveOneLeg(leg);
   });
 
@@ -542,23 +559,42 @@ function SpiderModel({
 
 // ── Public component ──────────────────────────────────────────────────────────
 export default function SpiderSim() {
+  const { profile } = useSettings();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mouseNDC     = useRef(new THREE.Vector2());
+  const params       = useRef<SpiderParams>({ ...DEFAULT_SPIDER_PARAMS });
+  const [showControls, setShowControls] = useState(false);
+  const [headSmooth, setHeadSmooth] = useState(params.current.headSmooth);
+  const [bodyLean, setBodyLean] = useState(params.current.bodyLean);
+  const [stepDistance, setStepDistance] = useState(params.current.stepDistance);
+  const [stepHeight, setStepHeight] = useState(params.current.stepHeight);
 
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
       <Canvas
-        shadows
-        dpr={[1, 1.5]}
+        shadows={profile.high}
+        dpr={profile.dpr}
         camera={{ position: [0, 3.5, 11], fov: 42, near: 0.1, far: 100 }}
         onCreated={({ camera }) => camera.lookAt(0, -0.5, -2)}
-        gl={{ antialias: true }}
+        gl={{ antialias: profile.antialias }}
         style={{ width: "100%", height: "100%" }}
       >
+        <CanvasStatsReporter />
         {/* ── Always-visible scene scaffold ─────────────────────────────── */}
         <color attach="background" args={["#F5F5F5"]} />
-        <ambientLight intensity={0.01} color="#ffffff" />
-        <Environment preset="studio" environmentIntensity={0.6} />
+        {/* High quality: image-based studio env. Performance: cheap analytic lights. */}
+        {profile.high ? (
+          <>
+            <ambientLight intensity={0.01} color="#ffffff" />
+            <Environment preset="studio" environmentIntensity={0.6} />
+          </>
+        ) : (
+          <>
+            <ambientLight intensity={0.7} color="#ffffff" />
+            <hemisphereLight intensity={0.9} color="#ffffff" groundColor="#cccccc" />
+            <directionalLight position={[5, 8, 5]} intensity={1.1} color="#ffffff" />
+          </>
+        )}
 
         {/* Grid — visible immediately, confirms canvas is rendering */}
         <gridHelper args={[60, 15, "#BBBBBB", "#DDDDDD"]} position={[0, -2.251, 0]} />
@@ -571,9 +607,62 @@ export default function SpiderSim() {
 
         {/* ── Spider model — suspends until spider.glb is ready ───────────── */}
         <Suspense fallback={null}>
-          <SpiderModel mouseNDC={mouseNDC} />
+          <SpiderModel mouseNDC={mouseNDC} params={params} />
         </Suspense>
       </Canvas>
+
+      <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
+        <div className="grid md:grid-cols-2 gap-4">
+          <SliderRow
+            label="Head Smooth"
+            value={headSmooth}
+            display={headSmooth.toFixed(2)}
+            min={0.01}
+            max={0.2}
+            step={0.01}
+            onChange={(v) => {
+              setHeadSmooth(v);
+              params.current.headSmooth = v;
+            }}
+          />
+          <SliderRow
+            label="Body Lean"
+            value={bodyLean}
+            display={bodyLean.toFixed(2)}
+            min={0}
+            max={3}
+            step={0.05}
+            onChange={(v) => {
+              setBodyLean(v);
+              params.current.bodyLean = v;
+            }}
+          />
+          <SliderRow
+            label="Step Distance"
+            value={stepDistance}
+            display={stepDistance.toFixed(2)}
+            min={0.08}
+            max={0.6}
+            step={0.01}
+            onChange={(v) => {
+              setStepDistance(v);
+              params.current.stepDistance = v;
+            }}
+          />
+          <SliderRow
+            label="Step Height"
+            value={stepHeight}
+            display={stepHeight.toFixed(2)}
+            min={0.05}
+            max={0.8}
+            step={0.01}
+            onChange={(v) => {
+              setStepHeight(v);
+              params.current.stepHeight = v;
+            }}
+          />
+        </div>
+      </ControlsPanel>
     </div>
   );
 }

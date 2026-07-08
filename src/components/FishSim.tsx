@@ -3,6 +3,8 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { PauseButton, ControlsPanel, SliderRow } from "./sim";
+import { useSettings } from "./SettingsContext";
+import { CanvasStatsReporter } from "./CanvasStats";
 
 // ── Simulation parameters (exported for external control) ─────────────────
 export interface SimParams {
@@ -59,17 +61,19 @@ function FishScene({
   mouseInCanvas,
   params,
   shadowEnabled,
+  high,
 }: {
   ndcMouse: React.MutableRefObject<THREE.Vector2>;
   mouseInCanvas: React.MutableRefObject<boolean>;
   params: React.MutableRefObject<SimParams>;
   shadowEnabled: boolean;
+  high: boolean;
 }) {
   const { scene } = useGLTF("/fih.glb");
   const fishTexture = useTexture("/fishtexture.png");
   const { camera, scene: r3fScene } = useThree();
 
-  // Textur auf alle SkinnedMesh-Materialien anwenden
+  // Textur auf alle SkinnedMesh-Materialien anwenden (nur im High-Quality-Modus)
   useEffect(() => {
     fishTexture.flipY = false;
     fishTexture.needsUpdate = true;
@@ -81,11 +85,11 @@ function FishScene({
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       mats.forEach((m) => {
         const mat = m as THREE.MeshStandardMaterial;
-        mat.map = fishTexture;
+        mat.map = high ? fishTexture : null;
         mat.needsUpdate = true;
       });
     });
-  }, [scene, fishTexture, shadowEnabled]);
+  }, [scene, fishTexture, shadowEnabled, high]);
 
   const spineBones    = useRef<THREE.Bone[]>([]);
   const restQuats     = useRef<THREE.Quaternion[]>([]); // lokale Rest-Quaternions
@@ -315,6 +319,7 @@ function FishScene({
 
 // ── Public component ───────────────────────────────────────────────────────
 export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObject<SimParams> }) {
+  const { profile } = useSettings();
   const internalParamsRef = useRef<SimParams>(DEFAULT_SIM_PARAMS);
   const params = paramsRef ?? internalParamsRef;
   const ndcMouse      = useRef(new THREE.Vector2(0, 0));
@@ -326,11 +331,13 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
   const sectionRef    = useRef<HTMLElement>(null);
   const [paused, setPaused] = useState(false);
   const [showControls, setShowControls] = useState(false);
-  const [shadowEnabled, setShadowEnabled] = useState(false);
   const [maxBendDeg, setMaxBendDeg] = useState((params.current.maxBend * 180) / Math.PI);
   const [orbitRadius, setOrbitRadius] = useState(params.current.orbitRadius);
   const [forceStrength, setForceStrength] = useState(params.current.forceStrength);
   const [followSpeed, setFollowSpeed] = useState(params.current.followSpeed);
+
+  // Shadows follow the global render-quality setting (high quality only).
+  const shadowsOn = profile.high;
 
   function updateMaxBendDeg(nextDeg: number) {
     setMaxBendDeg(nextDeg);
@@ -469,24 +476,10 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
             step={0.01}
             onChange={updateFollowSpeed}
           />
-
-          <div className="md:col-span-2 mt-1 flex items-center justify-between rounded-lg border border-[#2a2a2a] px-4 py-3">
-            <span className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-[#888]">Ground Shadow</span>
-            <button
-              onClick={() => setShadowEnabled((v) => !v)}
-              className={`rounded-full border px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.14em] transition-colors ${
-                shadowEnabled
-                  ? "border-accent text-accent"
-                  : "border-[#444] text-[#777] hover:text-accent hover:border-accent"
-              }`}
-            >
-              {shadowEnabled ? "On" : "Off"}
-            </button>
-          </div>
         </div>
       </ControlsPanel>
 
-      <div style={{ filter: "url(#water-distort)" }} className="relative z-10 w-full h-full">
+      <div style={profile.high ? { filter: "url(#water-distort)" } : undefined} className="relative z-10 w-full h-full">
           {/* Background title with subtle parallax */}
           <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
             <div className="absolute inset-0 flex items-center justify-center px-8">
@@ -513,21 +506,22 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           />
           <Canvas
           frameloop={paused ? "never" : "always"}
-          dpr={[1, 1.5]}
+          dpr={profile.dpr}
           orthographic
-          shadows={shadowEnabled}
+          shadows={shadowsOn}
           camera={{ position: [0, 200, 0], zoom: 80, near: 1, far: 1000 }}
-          gl={{ antialias: true, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
+          gl={{ antialias: profile.antialias, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
           className="relative z-10 w-full h-full"
           onCreated={({ camera, gl }) => {
             camera.lookAt(0, 0, 0);
             gl.setClearColor(0x000000, 0); // transparent
           }}
         >
-          <ambientLight intensity={shadowEnabled ? 0.38 : 0.6} />
+          <CanvasStatsReporter />
+          <ambientLight intensity={shadowsOn ? 0.38 : 0.6} />
           <directionalLight position={[0, 10, 5]}  intensity={2.0} color="#ffffff" />
           <directionalLight position={[0, 10, -5]} intensity={0.6} color="#4488ff" />
-          {shadowEnabled && (
+          {shadowsOn && (
             <directionalLight
               position={[16, 11, 10]}
               intensity={1.15}
@@ -547,7 +541,7 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           )}
 
           <Suspense fallback={null}>
-            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} params={params} shadowEnabled={shadowEnabled} />
+            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} params={params} shadowEnabled={shadowsOn} high={profile.high} />
           </Suspense>
         </Canvas>
         </div>
