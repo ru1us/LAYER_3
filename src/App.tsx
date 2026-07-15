@@ -1,17 +1,22 @@
-import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout.tsx";
 import HomePage from "./pages/HomePage.tsx";
 import AboutPage from "./pages/AboutPage.tsx";
 import StyleguidePage from "./pages/StyleguidePage.tsx";
+import ImprintPage from "./pages/ImprintPage.tsx";
+import PrivacyPage from "./pages/PrivacyPage.tsx";
+import { getPage, useLocationPath } from "./nav.ts";
 
 export default function App() {
+  const { pathname, hash } = useLocationPath();
+  const page = getPage(pathname);
+
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/about" element={<AboutPage />} />
-        <Route path="/styleguide" element={<StyleguidePage />} />
-      </Route>
-    </Routes>
+    <Layout page={page} pathname={pathname} hash={hash}>
+      {page === "home" && <HomePage />}
+      {page === "about" && <AboutPage />}
+      {page === "styleguide" && <StyleguidePage />}
+      {page === "imprint" && <ImprintPage />}
+      {page === "privacy" && <PrivacyPage />}
+    </Layout>
   );
 }

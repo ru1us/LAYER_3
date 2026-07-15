@@ -2,7 +2,7 @@
  * SliderRow – reusable labeled range input for sim controls.
  *
  * Pairs a label + live value readout with a styled range input.
- * Dark-themed to sit inside ControlsPanel; uses the accent thumb (.sim-range).
+ * Light-themed to sit inside ControlsPanel; uses the accent thumb (.sim-range).
  */
 export function SliderRow({
   label,
@@ -23,9 +23,9 @@ export function SliderRow({
 }) {
   return (
     <label className="block">
-      <div className="mb-2 flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-[0.14em] text-[#888]">
+      <div className="mb-2 flex items-center justify-between font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-text-muted">
         <span>{label}</span>
-        <span className="text-accent">{display}</span>
+        <span className="text-text">{display}</span>
       </div>
       <input
         type="range"

@@ -40,25 +40,24 @@ const INACTIVITY_DELAY = 2.0;
 const IDLE_BLEND_SPEED = 0.6;
 const IDLE_YAW_AMP     = 0.45;
 const IDLE_PITCH_AMP   = 0.2;
-const STEP_TRIGGER_DIST = 0.24;
-const STEP_HEIGHT = 0.34;
-const STEP_SPEED = 1.8;
-const STEP_COOLDOWN = 0.4;
-const STEP_LEAD = 1.6;
-const STEP_MAX_LEAD = 0.18;
+const MAX_FOOT_LIFT = 0.45;
+const IK_FAIL_DISTANCE = 0.12;
+const FOOT_LIFT_GAIN = 0.75;
+const MAX_JOINT_UPDATE = 0.12;
+/** Default bend scale = 100% of the rig's measured joint ranges. */
+const DEFAULT_MAX_BEND = 1.0;
 
 interface SpiderParams {
   headSmooth: number;
   bodyLean: number;
-  stepDistance: number;
-  stepHeight: number;
+  /** Multiplier on per-joint rotation clamps (0.4 = stiff, 1.5 = very flexible). */
+  maxBend: number;
 }
 
 const DEFAULT_SPIDER_PARAMS: SpiderParams = {
   headSmooth: HEAD_SMOOTH,
   bodyLean: 1.5,
-  stepDistance: STEP_TRIGGER_DIST,
-  stepHeight: STEP_HEIGHT,
+  maxBend: DEFAULT_MAX_BEND,
 };
 
 const LEG_NAMES = ["L1", "L2", "L3", "L4", "R1", "R2", "R3", "R4"] as const;
@@ -72,8 +71,6 @@ const _ee   = new THREE.Vector3();   // end-effector world position
 const _r    = new THREE.Vector3();   // ee − joint
 const _err  = new THREE.Vector3();   // target − ee
 const _col  = new THREE.Vector3();   // Jacobian column (axisW × r)
-const _stepDesired = new THREE.Vector3();
-const _stepLead = new THREE.Vector3();
 
 // Jacobian stored as n×3 row-major Float64Array: row = joint, cols = [vx,vy,vz]
 const _jBuf = new Float64Array(5 * 3);   // max 5 joints
@@ -101,19 +98,12 @@ function solveDLS3(): boolean {
 interface LegData {
   joints: THREE.Object3D[];
   isRoot: boolean[];   // true = first/root joint (Z axis), false = bend joint (X axis)
-  isLeft: boolean;
   /** Per-joint [min, max] in radians */
   clamp: [number, number][];
   target: THREE.Vector3;
+  groundTarget: THREE.Vector3;
   endLocal: THREE.Vector3;
-  stepFrom: THREE.Vector3;
-  stepTo: THREE.Vector3;
-  homeLocal: THREE.Vector3;
-  prevDesired: THREE.Vector3;
   groundY: number;
-  stepProgress: number;
-  stepCooldown: number;
-  isStepping: boolean;
 }
 
 function getLowestWorldPoint(root: THREE.Object3D): THREE.Vector3 {
@@ -142,12 +132,18 @@ function getLowestWorldPoint(root: THREE.Object3D): THREE.Vector3 {
 }
 
 // ── Jacobian DLS solver for one leg ──────────────────────────────────────────
-function solveOneLeg(leg: LegData): void {
+function jointLimits(base: [number, number], maxBend: number): [number, number] {
+  return [base[0] * maxBend, base[1] * maxBend];
+}
+
+function solveOneLeg(leg: LegData, maxBend: number): void {
   const { joints, isRoot, target, endLocal } = leg;
   const n = joints.length;
   if (n === 0) return;
 
-  for (let iter = 0; iter < IK_ITER; iter++) {
+  target.copy(leg.groundTarget);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (let iter = 0; iter < IK_ITER; iter++) {
     // Current end-effector = planted contact point on the visible foot mesh
     joints[n - 1].localToWorld(_ee.copy(endLocal));
     _err.subVectors(target, _ee);
@@ -190,14 +186,25 @@ function solveOneLeg(leg: LegData): void {
                    + _jBuf[i * 3 + 1] * _v3[1]
                    + _jBuf[i * 3 + 2] * _v3[2];
       const axis: "z" | "x" = isRoot[i] ? "z" : "x";  // root → Z, others → X
-      const [mn, mx] = leg.clamp[i];
+      const [mn, mx] = jointLimits(leg.clamp[i], maxBend);
+      const stableTheta = THREE.MathUtils.clamp(dTheta, -MAX_JOINT_UPDATE, MAX_JOINT_UPDATE);
       joints[i].rotation[axis] = THREE.MathUtils.clamp(
-        joints[i].rotation[axis] + dTheta,
+        joints[i].rotation[axis] + stableTheta,
         mn,
         mx,
       );
       joints[i].updateWorldMatrix(false, true);
     }
+    }
+
+    joints[n - 1].localToWorld(_ee.copy(endLocal));
+    _err.subVectors(target, _ee);
+    if (attempt === 0 && _err.length() > IK_FAIL_DISTANCE) {
+      const lift = Math.min(MAX_FOOT_LIFT, (_err.length() - IK_FAIL_DISTANCE) * FOOT_LIFT_GAIN);
+      target.y += lift;
+      continue;
+    }
+    break;
   }
 
   // ── Floor clamp: lift foot back to groundY if IK left it below ────────
@@ -224,86 +231,13 @@ function solveOneLeg(leg: LegData): void {
 
     for (let i = 0; i < n; i++) {
       const axis: "z" | "x" = isRoot[i] ? "z" : "x";
-      const [mn, mx] = leg.clamp[i];
+      const [mn, mx] = jointLimits(leg.clamp[i], maxBend);
       joints[i].rotation[axis] = THREE.MathUtils.clamp(
         joints[i].rotation[axis] + _jBuf[i * 3 + 0] * dTheta,
         mn, mx,
       );
       joints[i].updateWorldMatrix(false, true);
     }
-  }
-}
-
-function updateLegTargets(legs: LegData[], group: THREE.Object3D, delta: number, params: SpiderParams): void {
-  for (const leg of legs) {
-    leg.stepCooldown = Math.max(leg.stepCooldown - delta, 0);
-    if (!leg.isStepping) continue;
-    leg.stepProgress = Math.min(leg.stepProgress + STEP_SPEED * delta, 1);
-    leg.target.lerpVectors(leg.stepFrom, leg.stepTo, leg.stepProgress);
-    leg.target.y = THREE.MathUtils.lerp(leg.stepFrom.y, leg.stepTo.y, leg.stepProgress)
-      + Math.sin(leg.stepProgress * Math.PI) * params.stepHeight;
-    if (leg.stepProgress >= 1) {
-      leg.target.copy(leg.stepTo);
-      leg.isStepping = false;
-      leg.stepCooldown = STEP_COOLDOWN;
-    }
-  }
-
-  let leftGrounded = 0;
-  let rightGrounded = 0;
-  let leftStepping = false;
-  let rightStepping = false;
-  let bestLeft: LegData | null = null;
-  let bestRight: LegData | null = null;
-  const stepTriggerDistSq = params.stepDistance * params.stepDistance;
-  let bestLeftDist = stepTriggerDistSq;
-  let bestRightDist = stepTriggerDistSq;
-
-  for (const leg of legs) {
-    if (leg.isStepping) {
-      if (leg.isLeft) leftStepping = true;
-      else rightStepping = true;
-      continue;
-    }
-
-    if (leg.isLeft) leftGrounded++;
-    else rightGrounded++;
-
-    if (leg.stepCooldown > 0) continue;
-    group.localToWorld(_stepDesired.copy(leg.homeLocal));
-    _stepDesired.y = leg.groundY;
-    const distSq = _stepDesired.distanceToSquared(leg.target);
-    if (leg.isLeft) {
-      if (distSq > bestLeftDist) {
-        bestLeft = leg;
-        bestLeftDist = distSq;
-      }
-    } else if (distSq > bestRightDist) {
-      bestRight = leg;
-      bestRightDist = distSq;
-    }
-  }
-
-  const startStep = (leg: LegData) => {
-    group.localToWorld(_stepDesired.copy(leg.homeLocal));
-    _stepDesired.y = leg.groundY;
-    _stepLead.subVectors(_stepDesired, leg.prevDesired);
-    if (_stepLead.length() > STEP_MAX_LEAD) _stepLead.setLength(STEP_MAX_LEAD);
-
-    leg.stepFrom.copy(leg.target);
-    leg.stepTo.copy(_stepDesired).addScaledVector(_stepLead, STEP_LEAD);
-    leg.stepTo.y = leg.groundY;
-    leg.stepProgress = 0;
-    leg.isStepping = true;
-    leg.target.copy(leg.stepFrom);
-  };
-
-  if (bestLeft && !leftStepping && leftGrounded > 1) startStep(bestLeft);
-  if (bestRight && !rightStepping && rightGrounded > 1) startStep(bestRight);
-
-  for (const leg of legs) {
-    group.localToWorld(leg.prevDesired.copy(leg.homeLocal));
-    leg.prevDesired.y = leg.groundY;
   }
 }
 
@@ -315,17 +249,41 @@ function SpiderModel({
   mouseNDC: React.RefObject<THREE.Vector2>;
   params: React.MutableRefObject<SpiderParams>;
 }) {
-  const gltf = useGLTF("/spider.glb");
+  const gltf = useGLTF("/spider3.glb");
   const gl = useThree((s) => s.gl);
+
+  // Soften matte materials so the studio HDRI actually shows up in reflections.
+  // NonColor maps on roughness/metalness are correct — they are not the issue.
+  useEffect(() => {
+    gltf.scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.material) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of mats) {
+        const m = mat as THREE.MeshStandardMaterial;
+        if (!m.isMeshStandardMaterial && !(m as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) continue;
+        m.envMapIntensity = 1.25;
+        // Pull extreme matte finishes slightly into the reflective range
+        if (typeof m.roughness === "number") {
+          m.roughness = Math.min(m.roughness, 0.85);
+        }
+        m.needsUpdate = true;
+      }
+    });
+  }, [gltf.scene]);
+
+  // Measure floor height from the GLB ground, but keep it invisible —
+  // the scene uses the flat gray background + grid instead.
   const staticGround = useMemo(() => {
     const source = gltf.scene.getObjectByName("ground") ?? null;
     if (!source) return null;
-    source.visible = false;
+    source.traverse((obj) => {
+      obj.visible = false;
+    });
     const ground = source.clone(true);
-    ground.visible = true;
+    ground.visible = false;
     ground.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (mesh.isMesh) mesh.receiveShadow = true;
+      obj.visible = false;
     });
     return ground;
   }, [gltf.scene]);
@@ -351,23 +309,6 @@ function SpiderModel({
 
     gltf.scene.updateWorldMatrix(true, true);
 
-    // ── Boost emissive on the dark accent material so bloom picks it up ──
-    gltf.scene.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const mat of mats) {
-        const m = mat as THREE.MeshStandardMaterial;
-        if (!m.isMeshStandardMaterial) continue;
-        // Material.002 = black accent on legs/body → give it a glow
-        if (m.name === "Material.002") {
-          m.emissive = new THREE.Color("#E8FF00");
-          m.emissiveIntensity = 1;
-          m.needsUpdate = true;
-        }
-      }
-    });
-
     // Bounding box — tells us scale + position
     const box  = new THREE.Box3().setFromObject(gltf.scene);
     const ctr  = new THREE.Vector3();
@@ -390,7 +331,6 @@ function SpiderModel({
     for (const root of LEG_NAMES) {
       const joints: THREE.Object3D[] = [];
       const isRoot: boolean[] = [];
-      const isLeft = root.startsWith("L");
       const clamp: [number, number][] = [];
 
       for (let i = 1; i <= 5; i++) {
@@ -423,18 +363,11 @@ function SpiderModel({
       legs.push({
         joints,
         isRoot,
-        isLeft,
         clamp,
         target: new THREE.Vector3(),
+        groundTarget: new THREE.Vector3(),
         endLocal: new THREE.Vector3(),
-        stepFrom: new THREE.Vector3(),
-        stepTo: new THREE.Vector3(),
-        homeLocal: new THREE.Vector3(),
-        prevDesired: new THREE.Vector3(),
         groundY: 0,
-        stepProgress: 0,
-        stepCooldown: 0,
-        isStepping: false,
       });
     }
 
@@ -457,13 +390,10 @@ function SpiderModel({
       const foot = leg.joints[leg.joints.length - 1];
       const contactWorld = getLowestWorldPoint(foot);
       leg.endLocal.copy(foot.worldToLocal(contactWorld.clone()));
-      leg.target.copy(contactWorld);
-      if (floorY !== null) leg.target.y = floorY;
-      leg.groundY = leg.target.y;
-      leg.homeLocal.copy(groupRef.current.worldToLocal(leg.target.clone()));
-      leg.prevDesired.copy(leg.target);
-      leg.stepFrom.copy(leg.target);
-      leg.stepTo.copy(leg.target);
+      leg.groundTarget.copy(contactWorld);
+      if (floorY !== null) leg.groundTarget.y = floorY;
+      leg.target.copy(leg.groundTarget);
+      leg.groundY = leg.groundTarget.y;
     }
 
     legsRef.current = legs;
@@ -543,17 +473,13 @@ function SpiderModel({
     headRef.current.rotation.x = -Math.PI / 2 - headPitch.current;
     groupRef.current.updateWorldMatrix(true, true);
 
-    updateLegTargets(legsRef.current, groupRef.current, delta, params.current);
-    for (const leg of legsRef.current) solveOneLeg(leg);
+    for (const leg of legsRef.current) solveOneLeg(leg, params.current.maxBend);
   });
 
   return (
-    <>
-      {staticGround && <primitive object={staticGround} />}
-      <group ref={groupRef} position={[0, 0, 0]}>
-        <primitive object={gltf.scene} />
-      </group>
-    </>
+    <group ref={groupRef} position={[0, 0, 0]}>
+      <primitive object={gltf.scene} />
+    </group>
   );
 }
 
@@ -566,8 +492,7 @@ export default function SpiderSim() {
   const [showControls, setShowControls] = useState(false);
   const [headSmooth, setHeadSmooth] = useState(params.current.headSmooth);
   const [bodyLean, setBodyLean] = useState(params.current.bodyLean);
-  const [stepDistance, setStepDistance] = useState(params.current.stepDistance);
-  const [stepHeight, setStepHeight] = useState(params.current.stepHeight);
+  const [maxBend, setMaxBend] = useState(params.current.maxBend);
 
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
@@ -576,17 +501,26 @@ export default function SpiderSim() {
         dpr={profile.dpr}
         camera={{ position: [0, 3.5, 11], fov: 42, near: 0.1, far: 100 }}
         onCreated={({ camera }) => camera.lookAt(0, -0.5, -2)}
-        gl={{ antialias: profile.antialias }}
+        gl={{
+          antialias: profile.antialias,
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.1,
+        }}
         style={{ width: "100%", height: "100%" }}
       >
         <CanvasStatsReporter />
         {/* ── Always-visible scene scaffold ─────────────────────────────── */}
         <color attach="background" args={["#F5F5F5"]} />
-        {/* High quality: image-based studio env. Performance: cheap analytic lights. */}
+        {/* High quality: studio HDRI + soft key light. Performance: analytic lights only. */}
         {profile.high ? (
           <>
-            <ambientLight intensity={0.01} color="#ffffff" />
-            <Environment preset="studio" environmentIntensity={0.6} />
+            <ambientLight intensity={0.25} color="#ffffff" />
+            <directionalLight position={[6, 10, 4]} intensity={0.55} color="#ffffff" />
+            <directionalLight position={[-4, 3, -2]} intensity={0.2} color="#d0e0ff" />
+            <Suspense fallback={null}>
+              {/* warehouse has stronger specular contrast than studio (softboxes / windows) */}
+              <Environment preset="studio" environmentIntensity={0.5} />
+            </Suspense>
           </>
         ) : (
           <>
@@ -638,27 +572,15 @@ export default function SpiderSim() {
             }}
           />
           <SliderRow
-            label="Step Distance"
-            value={stepDistance}
-            display={stepDistance.toFixed(2)}
-            min={0.08}
-            max={0.6}
-            step={0.01}
+            label="Max Bend"
+            value={maxBend}
+            display={`${(maxBend * 100).toFixed(0)}%`}
+            min={0.4}
+            max={1.5}
+            step={0.05}
             onChange={(v) => {
-              setStepDistance(v);
-              params.current.stepDistance = v;
-            }}
-          />
-          <SliderRow
-            label="Step Height"
-            value={stepHeight}
-            display={stepHeight.toFixed(2)}
-            min={0.05}
-            max={0.8}
-            step={0.01}
-            onChange={(v) => {
-              setStepHeight(v);
-              params.current.stepHeight = v;
+              setMaxBend(v);
+              params.current.maxBend = v;
             }}
           />
         </div>

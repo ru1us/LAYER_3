@@ -1,64 +1,106 @@
-import { useRef, Suspense, lazy } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import DeferredCanvas from "../components/DeferredCanvas.tsx";
+import { algorithmContent, type AlgorithmKey } from "../content/algorithmContent.ts";
 
 const HeroRobot = lazy(() => import("../components/HeroRobot.tsx"));
 const FishSim = lazy(() => import("../components/FishSim.tsx"));
 const SpiderSim = lazy(() => import("../components/SpiderSim.tsx"));
 
-// ── Reusable folder-tab box ────────────────────────────────────────────────
 function CanvasFallback() {
   return (
     <div className="flex h-full min-h-screen items-center justify-center bg-bg">
-      <div className="font-mono text-[0.7rem] tracking-caps uppercase text-text-muted">
-        Loading...
-      </div>
+      <div className="font-mono text-[0.7rem] tracking-caps uppercase text-text-muted">Loading...</div>
     </div>
   );
 }
 
-function AlgoBox({
-  tag,
-  title,
-  left,
-  right,
+const ROW_LABEL = "block mb-3 text-[0.62rem] font-bold uppercase tracking-[0.18em] text-text-muted";
+const ROW_TEXT = "m-0 max-w-3xl text-[0.84rem] leading-[1.85] text-text-muted";
+const ROW = "py-7 border-t border-border last:border-b";
+
+function AlgoBox({ algorithm, id }: { algorithm: AlgorithmKey; id: string }) {
+  const copy = algorithmContent[algorithm];
+
+  return (
+    <section id={id} className="scroll-mt-28 border-t border-border bg-bg py-[clamp(4rem,8vw,7rem)]">
+      <div className="mx-auto w-[min(100%-80px,1100px)]">
+        {/* Header */}
+        <div className="mb-[clamp(2.5rem,5vw,4rem)] grid grid-cols-[200px_minmax(0,1fr)] gap-[clamp(1.5rem,4vw,4rem)] items-start max-[720px]:grid-cols-1 max-[720px]:gap-4">
+          <div className="flex justify-between gap-4 pt-3 border-t-2 border-text text-[0.62rem] font-bold uppercase tracking-[0.18em] text-text-muted">
+            <span className="font-doto text-[1.1rem] text-text">{copy.number}</span>
+            <span>Algorithm</span>
+          </div>
+          <div>
+            <h2 className="m-0 font-doto text-[clamp(2.4rem,5vw,5rem)] font-black uppercase leading-[0.85] tracking-[-0.045em]">{copy.title}</h2>
+            <span className="mt-2.5 block text-[0.67rem] font-bold uppercase tracking-[0.2em] text-text-muted">{copy.shortLabel}</span>
+          </div>
+        </div>
+
+        {/* Rows */}
+        <div className={ROW}>
+          <span className={ROW_LABEL}>{copy.homeIntroTitle}</span>
+          <p className={ROW_TEXT}>{copy.homeIntro}</p>
+        </div>
+        <div className={ROW}>
+          <span className={ROW_LABEL}>{copy.homeMethodTitle}</span>
+          <p className={ROW_TEXT}>{copy.homeMethod}</p>
+        </div>
+        <div className={ROW}>
+          <span className={ROW_LABEL}>What happens in the simulation</span>
+          <div className="flex flex-col gap-3">
+            {copy.homeSteps.map((text, index) => (
+              <div key={text} className="flex gap-4 items-baseline">
+                <span className="font-doto text-[0.75rem] text-text w-6 shrink-0">{String(index + 1).padStart(2, "0")}</span>
+                <span className="text-[0.78rem] leading-[1.7] text-text-muted">{text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={ROW}>
+          <span className={ROW_LABEL}>Key parameters</span>
+          <div className="flex flex-wrap border border-text bg-text gap-px">
+            {copy.homeStats.map(({ label, value }) => (
+              <div key={label} className="flex-1 min-w-[140px] flex flex-col gap-1 p-4 px-5 bg-bg">
+                <span className="text-[0.58rem] font-bold uppercase tracking-[0.16em] text-text-muted">{label}</span>
+                <span className="font-doto text-[1rem] text-text">{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between pt-6 text-[0.6rem] font-bold uppercase tracking-[0.18em] text-text-muted">
+          <span>Three.js · React Three Fiber</span>
+          <span>Scroll study section</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SimulationSection({
   id,
+  children,
+  label,
+  title,
+  subtitle,
 }: {
-  tag: string;
-  title: string;
-  left: React.ReactNode;
-  right: React.ReactNode;
   id: string;
+  children: ReactNode;
+  label: string;
+  title: string;
+  subtitle: string;
 }) {
   return (
-    <section id={id} className="relative z-10 scroll-mt-28 bg-surface border-t border-border px-12 py-16">
-      <div className="mx-auto max-w-6xl">
-        <div className="relative">
-          {/* Folder tab */}
-          <div className="flex items-end">
-            <div className="border border-b-0 border-border bg-surface flex items-center gap-3 px-5 py-2 shrink-0">
-              <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">
-                {tag}
-              </span>
-              <span className="font-doto text-sm text-text">{title}</span>
-            </div>
-            <div className="flex-1 border-t border-border" />
-          </div>
-
-          {/* Two-column content */}
-          <div className="grid md:grid-cols-2">
-            <div className="border-r border-border p-10">{left}</div>
-            <div className="p-10">{right}</div>
-          </div>
-
-          {/* Footer link */}
-          <div className="border-t border-border px-10 py-4 flex items-center justify-between">
-            <span className="font-mono text-[0.6rem] text-text-muted uppercase tracking-[0.18em]">
-              Three.js · React Three Fiber
-            </span>
-            <span className="font-mono text-[0.7rem] uppercase tracking-[0.18em] text-text-muted">
-              Scroll study section
-            </span>
-          </div>
+    <section id={id} className="relative h-screen scroll-mt-28 border-t border-border">
+      <div className="sticky top-0 h-screen w-full">
+        <DeferredCanvas className="h-full w-full" fallback={<CanvasFallback />}>
+          <Suspense fallback={<CanvasFallback />}>{children}</Suspense>
+        </DeferredCanvas>
+        <div className="absolute bottom-6 left-6 z-20 flex flex-wrap items-center gap-3 pointer-events-none max-[720px]:flex-col max-[720px]:items-start max-[720px]:gap-1" style={{ maxWidth: "calc(100vw - 3rem)" }}>
+          {label && <span className="text-[0.63rem] font-bold uppercase tracking-[0.12em] text-text-muted">{label}</span>}
+          <span className="font-doto text-[1rem] font-black uppercase tracking-[-0.02em] text-text">{title}</span>
+          <span className="text-[0.63rem] font-bold uppercase tracking-[0.12em] text-text-muted">{subtitle}</span>
         </div>
       </div>
     </section>
@@ -66,281 +108,58 @@ function AlgoBox({
 }
 
 export default function HomePage() {
-  const heroRef = useRef<HTMLDivElement>(null);
-
   return (
     <div>
-      {/* ── Fish (FABRIK) ────────────────────── */}
       <DeferredCanvas className="relative z-10 min-h-screen" fallback={<CanvasFallback />} rootMargin="75% 0px">
         <Suspense fallback={<CanvasFallback />}>
           <FishSim />
         </Suspense>
       </DeferredCanvas>
+      <AlgoBox algorithm="fabrik" id="fabrik" />
 
-      {/* ── FABRIK Explanation ───────────────── */}
-      <AlgoBox
-        tag="Algorithm 01"
-        title="FABRIK"
-        id="fabrik"
-        left={
-          <>
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              A different approach
-            </p>
-            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted mb-6">
-              CCD works with <span className="text-text">angles</span>. FABRIK works with{" "}
-              <span className="text-text">positions</span>. Instead of rotating joints, it
-              repositions them — dragging the chain toward the target without ever computing
-              a rotation matrix.
-            </p>
-            <div className="h-px bg-border mb-6" />
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              Forward And Backward Reaching IK
-            </p>
-            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted">
-              FABRIK uses two passes. The <span className="text-text">forward pass</span> pulls
-              the tip to the target and drags each joint behind it. The{" "}
-              <span className="text-text">backward pass</span> re-anchors the base and adjusts
-              the chain back forward. The result is fast, stable, and produces naturally
-              flowing curves — ideal for organic chains like a fish spine.
-            </p>
-          </>
-        }
-        right={
-          <>
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              One Iteration — Step by Step
-            </p>
-            <div className="space-y-3 mb-8">
-              {[
-                ["01", "Move joint[0] (head) to the target position"],
-                ["02", "For each next joint: maintain segment length, drag direction constrained"],
-                ["03", "Apply max-bend angle constraint to prevent snake-like folding"],
-                ["04", "Result: a smooth curve from head to tail following the target"],
-              ].map(([n, text]) => (
-                <div key={n} className="flex gap-4">
-                  <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
-                  <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              {[
-                { k: "Chain joints", v: "6 (spine)" },
-                { k: "Pass direction", v: "Forward only" },
-                { k: "Max bend / segment", v: "45°" },
-              ].map(({ k, v }) => (
-                <div key={k} className="flex justify-between font-mono text-[0.72rem]">
-                  <span className="text-text-muted">{k}</span>
-                  <span className="text-text">{v}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        }
-      />
-
-      {/* ── Hero (CCD Robot) ─────────────────── */}
-      <section ref={heroRef} id="ccd" className="relative h-screen scroll-mt-28">
-        <div className="sticky top-0 h-screen w-full">
-          <DeferredCanvas className="h-full w-full" fallback={<CanvasFallback />}>
-            <Suspense fallback={<CanvasFallback />}>
-              <HeroRobot />
-            </Suspense>
-          </DeferredCanvas>
-
-          <div className="absolute bottom-0 left-0 z-20 pointer-events-none p-16">
-            <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#555555] mb-2">
-              Interactive
-            </p>
-            <h2 className="font-doto text-4xl text-[#ffffff]">CCD_IK</h2>
-            <p className="font-mono text-[0.65rem] text-[#555555] mt-2 tracking-widest">
-              Cyclic Coordinate Descent · follow cursor
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* ── CCD Explanation ──────────────────── */}
-      <AlgoBox
-        tag="Algorithm 02"
+      <SimulationSection
+        id="ccd"
+        label=""
         title="CCD_IK"
-        id="ccd-study"
-        left={
-          <>
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              What is Inverse Kinematics?
-            </p>
-            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted mb-6">
-              A robotic arm has joints. If you set each joint angle manually and calculate
-              where the tip ends up — that's <span className="text-text">forward kinematics</span>.{" "}
-              <span className="text-text">Inverse kinematics</span> is the reverse: you define
-              where the tip should be, and the algorithm figures out the joint angles.
-            </p>
-            <div className="h-px bg-border mb-6" />
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              Cyclic Coordinate Descent
-            </p>
-            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted">
-              CCD solves IK <span className="text-text">iteratively</span>. Starting from the
-              joint nearest the end-effector, each joint rotates by the minimum angle needed to
-              bring the tip closer to the target. The cycle repeats from tip to base until the
-              chain converges — typically in 6–8 passes per frame.
-            </p>
-          </>
-        }
-        right={
-          <>
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              One Iteration — Step by Step
-            </p>
-            <div className="space-y-3 mb-8">
-              {[
-                ["01", "Pick the joint closest to the end-effector"],
-                ["02", "Compute the angle between EE → joint and target → joint"],
-                ["03", "Rotate the joint by that delta, clamped to joint limits"],
-                ["04", "Update world matrices and move to the next joint (toward base)"],
-                ["05", "Repeat the full cycle N times until error is below threshold"],
-              ].map(([n, text]) => (
-                <div key={n} className="flex gap-4">
-                  <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
-                  <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              {[
-                { k: "Joints", v: "6" },
-                { k: "Iterations / frame", v: "8" },
-                { k: "Lerp smoothing", v: "0.035 – 0.095" },
-              ].map(({ k, v }) => (
-                <div key={k} className="flex justify-between font-mono text-[0.72rem]">
-                  <span className="text-text-muted">{k}</span>
-                  <span className="text-text">{v}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        }
-      />
-
-      {/* ── Jacobian (Spider IK) ───────────────── */}
-      <section id="jacobian" className="relative h-screen scroll-mt-28 border-t border-border">
-        <div className="sticky top-0 h-screen w-full">
-          <DeferredCanvas className="h-full w-full" fallback={<CanvasFallback />}>
-            <Suspense fallback={<CanvasFallback />}>
-              <SpiderSim />
-            </Suspense>
-          </DeferredCanvas>
-          <div className="absolute bottom-0 left-0 z-20 pointer-events-none p-16">
-            <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#555555] mb-2">
-              Interactive
-            </p>
-            <h2 className="font-doto text-4xl text-[#ffffff]">JACOBIAN_IK</h2>
-            <p className="font-mono text-[0.65rem] text-[#555555] mt-2 tracking-widest">
-              Jacobian Pseudo-Inverse · spider rig
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Jacobian Explanation ─────────────── */}
-      <AlgoBox
-        tag="Algorithm 03"
-        title="JACOBIAN_IK"
-        id="jacobian-study"
-        left={
-          <>
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              The Jacobian Matrix
-            </p>
-            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted mb-6">
-              The <span className="text-text">Jacobian</span> is a matrix that maps joint
-              velocities to end-effector velocities. Each column describes how much the
-              end-effector moves when one joint rotates by a tiny amount — a{" "}
-              <span className="text-text">linearisation</span> of the full forward kinematics
-              at the current configuration.
-            </p>
-            <div className="h-px bg-border mb-6" />
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              Pseudo-Inverse IK
-            </p>
-            <p className="font-mono text-[0.78rem] leading-relaxed text-text-muted">
-              To move the tip toward a target, we compute the{" "}
-              <span className="text-text">position error</span> Δx and solve for joint
-              angle deltas via the{" "}
-              <span className="text-text">Moore–Penrose pseudo-inverse</span>: Δθ = J⁺ Δx.
-              Because the system is continuously re-linearised, the chain converges
-              smoothly — and unlike CCD, all joints move{" "}
-              <span className="text-text">simultaneously</span> in each step.
-            </p>
-          </>
-        }
-        right={
-          <>
-            <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted mb-5">
-              One Iteration — Step by Step
-            </p>
-            <div className="space-y-3 mb-8">
-              {[
-                ["01", "Compute world position of each joint via forward kinematics"],
-                ["02", "Build Jacobian J: column i = (joint_axis_i) × (EE − joint_i)"],
-                ["03", "Calculate error vector Δx = target − end-effector"],
-                ["04", "Compute pseudo-inverse J⁺ = Jᵀ (J Jᵀ + λ²I)⁻¹  (damped LS)"],
-                ["05", "Update all joint angles: Δθ = J⁺ Δx, clamp to joint limits"],
-              ].map(([n, text]) => (
-                <div key={n} className="flex gap-4">
-                  <span className="font-doto text-[0.7rem] text-text-muted shrink-0 w-6">{n}</span>
-                  <span className="font-mono text-[0.72rem] text-text-muted">{text}</span>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              {[
-                { k: "Joints", v: "6" },
-                { k: "Method", v: "Damped Least Squares" },
-                { k: "Damping factor λ", v: "0.05" },
-              ].map(({ k, v }) => (
-                <div key={k} className="flex justify-between font-mono text-[0.72rem]">
-                  <span className="text-text-muted">{k}</span>
-                  <span className="text-text">{v}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        }
-      />
-
-
-      {/* ── Tech stack ───────────────────────── */}
-      <section
-        id="about"
-        className="relative z-10 bg-surface border-t border-border px-12 py-16"
+        subtitle="Cyclic Coordinate Descent · follow cursor"
       >
-        <div className="mx-auto max-w-6xl">
-          <div className="relative">
-            <div className="flex items-end">
-              <div className="border border-b-0 border-border bg-surface flex items-center gap-3 px-5 py-2 shrink-0">
-                <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">Stack</span>
-                <span className="font-doto text-sm text-text">BUILT_WITH</span>
-              </div>
-              <div className="flex-1 border-t border-border" />
+        <HeroRobot />
+      </SimulationSection>
+      <AlgoBox algorithm="ccd" id="ccd-study" />
+
+      <SimulationSection
+        id="jacobian"
+        label=""
+        title="JACOBIAN_IK"
+        subtitle="Damped least squares · spider rig"
+      >
+        <SpiderSim />
+      </SimulationSection>
+      <AlgoBox algorithm="jacobian" id="jacobian-study" />
+
+      <section id="about" className="scroll-mt-28 border-t border-border bg-bg py-[clamp(4rem,8vw,7rem)]">
+        <div className="mx-auto w-[min(100%-80px,1100px)]">
+          <div className="mb-[clamp(2.5rem,5vw,4rem)] grid grid-cols-[200px_minmax(0,1fr)] gap-[clamp(1.5rem,4vw,4rem)] items-start max-[720px]:grid-cols-1 max-[720px]:gap-4">
+            <div className="flex justify-between gap-4 pt-3 border-t-2 border-text text-[0.62rem] font-bold uppercase tracking-[0.18em] text-text-muted">
+              <span className="font-doto text-[1.1rem] text-text">04</span>
+              <span>Stack</span>
             </div>
-            <div className="grid md:grid-cols-3">
-              {[
-                { name: "Three.js", text: "WebGL 3D engine. Manages scenes, cameras, geometry, materials and the render loop." },
-                { name: "React Three Fiber", text: "Declarative React renderer for Three.js. Components map directly to Three.js objects." },
-                { name: "Drei", text: "Utility library for R3F — loaders, controls, helpers, physics abstractions." },
-              ].map(({ name, text }, i) => (
-                <div
-                  key={name}
-                  className={`p-8 ${i < 2 ? "border-r border-border" : ""}`}
-                >
-                  <h3 className="font-doto text-[0.9rem] mb-3">{name}</h3>
-                  <p className="font-mono text-[0.72rem] leading-relaxed text-text-muted">{text}</p>
-                </div>
-              ))}
+            <div>
+              <h2 className="m-0 font-doto text-[clamp(2.4rem,5vw,5rem)] font-black uppercase leading-[0.85] tracking-[-0.045em]">BUILT_WITH</h2>
+              <span className="mt-2.5 block text-[0.67rem] font-bold uppercase tracking-[0.2em] text-text-muted">Tools and libraries</span>
             </div>
+          </div>
+          <div className={ROW}>
+            <span className={ROW_LABEL}>Three.js</span>
+            <p className={ROW_TEXT}>The 3D engine that manages scenes, cameras, models, materials, and the render loop.</p>
+          </div>
+          <div className={ROW}>
+            <span className={ROW_LABEL}>React Three Fiber</span>
+            <p className={ROW_TEXT}>A React renderer that lets the simulations describe Three.js scenes as components.</p>
+          </div>
+          <div className={ROW}>
+            <span className={ROW_LABEL}>Drei</span>
+            <p className={ROW_TEXT}>A set of practical helpers for model loading, lighting, controls, and reusable 3D setup.</p>
           </div>
         </div>
       </section>

@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import DeferredCanvas from "../components/DeferredCanvas.tsx";
+import { AlgorithmSection } from "../components/AlgorithmLayout.tsx";
 
 const ParticleSim = lazy(() => import("../components/ParticleSim.tsx"));
 
@@ -63,95 +64,78 @@ function LinkCard({ title, meta, href }: { title: string; meta: string; href: st
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="group block border border-border bg-surface p-6 transition-colors hover:bg-[#f3f3f3]"
+      className="group flex items-start justify-between gap-6 bg-bg p-6 px-7 transition-colors hover:bg-surface-hover"
     >
-      <div className="flex items-start justify-between gap-6">
-        <div>
-          <h3 className="font-doto text-lg text-text">{title}</h3>
-          <p className="mt-3 font-mono text-[0.72rem] leading-relaxed text-text-muted">{meta}</p>
-        </div>
-        <span className="font-mono text-[0.7rem] text-text-muted transition-transform group-hover:translate-x-1">→</span>
+      <div>
+        <h3 className="m-0 font-doto text-[1rem] font-black leading-[1.2] text-text">{title}</h3>
+        <p className="mt-2.5 text-[0.72rem] leading-[1.6] text-text-muted">{meta}</p>
       </div>
+      <span className="shrink-0 text-[0.8rem] font-bold text-text-muted transition-all group-hover:translate-x-1 group-hover:text-text">→</span>
     </a>
+  );
+}
+
+function LinkGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-2 border border-text bg-text gap-px max-[720px]:grid-cols-1">
+      {children}
+    </div>
   );
 }
 
 export default function AboutPage() {
   return (
-    <div className="bg-surface min-h-screen pt-28">
-      <section className="px-8 pb-20 pt-12">
-        <div className="mx-auto max-w-6xl">
-          <div className="grid gap-12 lg:grid-cols-[0.75fr_1.25fr]">
-            <div>
-              <p className="font-mono text-[0.65rem] uppercase tracking-[0.24em] text-text-muted">About this site</p>
-              <h1 className="mt-6 font-doto text-6xl leading-none text-text md:text-7xl">
-                IK as a visual introduction.
-              </h1>
-            </div>
-            <div className="border-l border-border pl-8">
-              <p className="font-mono text-[0.9rem] leading-8 text-text-muted">
-                This website is a small learning space for inverse kinematics: how a chain of joints can reach a target, how constraints shape motion, and how interactive 3D scenes can make those ideas easier to understand. It also serves as a practical study in Three.js, React Three Fiber, GLTF rigs, pointer interaction, animation loops, and browser-based realtime graphics.
-              </p>
-              <div className="mt-8 grid gap-4 sm:grid-cols-3">
-                {[
-                  ["01", "IK fundamentals"],
-                  ["02", "Three.js practice"],
-                  ["03", "Interactive rigs"],
-                ].map(([n, label]) => (
-                  <div key={n} className="border border-border p-4">
-                    <span className="font-doto text-xl text-text">{n}</span>
-                    <p className="mt-2 font-mono text-[0.68rem] uppercase tracking-[0.16em] text-text-muted">{label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+    <div className="min-h-screen bg-bg">
+      {/* Hero */}
+      <div className="pt-[clamp(5rem,10vw,8rem)] pb-12">
+        <div className="mx-auto w-[min(100%-80px,1100px)]">
+          <div className="mb-6 flex items-center gap-3 text-[0.67rem] font-bold uppercase tracking-[0.2em] text-text-muted">
+            <span className="h-2.5 w-2.5 bg-accent border border-text" style={{ boxShadow: "4px 4px 0 var(--color-text)" }} />
+            <span>About this site</span>
           </div>
-        </div>
-      </section>
-
-      <section className="border-t border-border px-8 py-16">
-        <div className="mx-auto max-w-6xl">
-          <div className="mb-8 flex items-end">
-            <div className="border border-b-0 border-border bg-surface px-5 py-2">
-              <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">Reading</span>
-              <span className="ml-4 font-doto text-sm text-text">PAPERS_AND_NOTES</span>
-            </div>
-            <div className="flex-1 border-t border-border" />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {papers.map((paper) => (
-              <LinkCard key={paper.href} {...paper} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-border px-8 py-16">
-        <div className="mx-auto max-w-6xl">
-          <div className="mb-8 flex items-end">
-            <div className="border border-b-0 border-border bg-surface px-5 py-2">
-              <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-text-muted">References</span>
-              <span className="ml-4 font-doto text-sm text-text">PROJECTS_AND_DEMOS</span>
-            </div>
-            <div className="flex-1 border-t border-border" />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {projects.map((project) => (
-              <LinkCard key={project.href} {...project} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-border px-8 py-16">
-        <div className="mx-auto max-w-6xl">
-          <p className="font-mono text-[0.65rem] uppercase tracking-[0.24em] text-text-muted">Extra experiment</p>
-          <h2 className="mt-4 font-doto text-4xl text-text">Particle interaction study</h2>
-          <p className="mt-4 max-w-2xl font-mono text-[0.78rem] leading-relaxed text-text-muted">
-            The particle simulation is kept here as a separate Three.js interaction sketch. It is not part of the IK introduction, but it belongs to the same learning goal: understanding realtime browser graphics through small, tactile experiments.
+          <h1 className="m-0 font-doto text-[clamp(3rem,8vw,7rem)] font-black uppercase leading-[0.82] tracking-[-0.045em]">IK as a visual introduction.</h1>
+          <p className="mt-6 max-w-2xl text-[0.84rem] leading-[1.85] text-text-muted">
+            This website is a small learning space for inverse kinematics: how a chain of joints can reach a target, how constraints shape motion, and how interactive 3D scenes can make those ideas easier to understand. It also serves as a practical study in Three.js, React Three Fiber, GLTF rigs, pointer interaction, animation loops, and browser-based realtime graphics.
           </p>
+          <div className="mt-8 flex max-w-md flex-wrap border border-text bg-text gap-px">
+            {[
+              ["01", "IK fundamentals"],
+              ["02", "Three.js practice"],
+              ["03", "Interactive rigs"],
+            ].map(([n, label]) => (
+              <div key={n} className="flex-1 min-w-[120px] flex flex-col gap-1 p-4 bg-bg">
+                <span className="font-doto text-[1rem] text-text">{n}</span>
+                <span className="text-[0.58rem] font-bold uppercase tracking-[0.16em] text-text-muted">{label}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </section>
+      </div>
+
+      {/* Papers */}
+      <AlgorithmSection number="01" label="Reading" title="PAPERS_AND_NOTES">
+        <LinkGrid>
+          {papers.map((paper) => (
+            <LinkCard key={paper.href} {...paper} />
+          ))}
+        </LinkGrid>
+      </AlgorithmSection>
+
+      {/* Projects */}
+      <AlgorithmSection number="02" label="References" title="PROJECTS_AND_DEMOS">
+        <LinkGrid>
+          {projects.map((project) => (
+            <LinkCard key={project.href} {...project} />
+          ))}
+        </LinkGrid>
+      </AlgorithmSection>
+
+      {/* Particle experiment */}
+      <AlgorithmSection number="03" label="Extra experiment" title="PARTICLE_STUDY">
+        <p className="m-0 max-w-3xl text-[0.84rem] leading-[1.85] text-text-muted">
+          The particle simulation is kept here as a separate Three.js interaction sketch. It is not part of the IK introduction, but it belongs to the same learning goal: understanding realtime browser graphics through small, tactile experiments.
+        </p>
+      </AlgorithmSection>
 
       <DeferredCanvas className="relative h-[640px]" fallback={<CanvasFallback />}>
         <Suspense fallback={<CanvasFallback />}>

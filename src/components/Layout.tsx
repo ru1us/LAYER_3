@@ -1,193 +1,186 @@
-import { useState, useRef, useEffect } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useSettings } from "./SettingsContext";
 import { GlobalStatsOverlay } from "./CanvasStats";
+import { navigate, type Page } from "../nav.ts";
 
-export default function Layout() {
-  const location = useLocation();
+const HOME_SECTIONS = ["fabrik", "ccd", "jacobian"] as const;
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="8" cy="17" r="2" />
+    </svg>
+  );
+}
+
+function go(event: ReactMouseEvent<HTMLAnchorElement>, href: string) {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+  event.preventDefault();
+  navigate(href);
+}
+
+export default function Layout({
+  page,
+  pathname,
+  hash,
+  children,
+}: {
+  page: Page;
+  pathname: string;
+  hash: string;
+  children: ReactNode;
+}) {
   const { quality, setQuality, showStats, toggleStats } = useSettings();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [navVisible, setNavVisible] = useState(true);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [activeKey, setActiveKey] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
-  const lastScrollY = useRef(0);
+  const ticking = useRef(false);
 
   useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (navRef.current && !navRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
+    if (page === "about") {
+      setActiveKey("about");
+    } else if (page === "home" && hash) {
+      setActiveKey(decodeURIComponent(hash.slice(1)));
+    } else if (page === "home") {
+      setActiveKey("fabrik");
+    } else {
+      setActiveKey("");
+    }
+  }, [page, hash]);
+
+  useEffect(() => {
+    if (page !== "home") return;
+
+    function updateActive() {
+      const navHeight = navRef.current?.getBoundingClientRect().height ?? 64;
+      const threshold = navHeight + 100;
+      let next: string = "fabrik";
+
+      for (const id of HOME_SECTIONS) {
+        const el = document.getElementById(id);
+        if (el && window.scrollY + threshold >= el.offsetTop) {
+          next = id;
+        }
+      }
+
+      setActiveKey(next);
+      ticking.current = false;
+    }
+
+    function onScroll() {
+      if (!ticking.current) {
+        requestAnimationFrame(updateActive);
+        ticking.current = true;
+      }
+    }
+
+    updateActive();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [page]);
+
+  useEffect(() => {
+    if (hash) {
+      const target = document.getElementById(decodeURIComponent(hash.slice(1)));
+      if (target) {
+        requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
+        return;
+      }
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [pathname, hash]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (navRef.current && !navRef.current.contains(event.target as Node)) {
+        setSettingsOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSettingsOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
 
-  useEffect(() => {
-    function handleScroll() {
-      const currentY = window.scrollY;
-      if (currentY < lastScrollY.current) {
-        setNavVisible(true);
-      } else if (currentY > lastScrollY.current && currentY > 60) {
-        setNavVisible(false);
-        setDropdownOpen(false);
-      }
-      lastScrollY.current = currentY;
+  function handleHomeClick(event: ReactMouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    setActiveKey("fabrik");
+    if (page === "home" && !hash) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
     }
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  useEffect(() => {
-    if (!location.hash) return;
-    const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
-    if (!target) return;
-    requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, [location]);
+    navigate("/");
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-bg">
-      {/* ── Navbar ────────────────────────────── */}
-      <header className={`fixed top-0 left-0 right-0 z-50 flex justify-center px-4 transition-transform duration-300 ${navVisible ? "translate-y-4" : "-translate-y-full"}`}>
-        <div ref={navRef} className="relative flex w-full max-w-4xl flex-col">
-          {/* Pill */}
-          <div className="flex items-center justify-between gap-6 rounded-full border border-border bg-surface/75 px-6 py-3 backdrop-blur-md">
-            <Link to="/" onClick={() => setDropdownOpen(false)} className="font-doto text-xl tracking-ui">
-              LAYER_3
-            </Link>
+      <header className="site-header">
+        <div ref={navRef} className="site-nav">
+          <nav className="site-links" aria-label="Primary navigation">
+            <a className={activeKey === "fabrik" ? "is-active" : ""} href="/" onClick={handleHomeClick}>FABRIK</a>
+            <a className={activeKey === "ccd" ? "is-active" : ""} href="/#ccd" onClick={(e) => go(e, "/#ccd")}>CCD</a>
+            <a className={activeKey === "jacobian" ? "is-active" : ""} href="/#jacobian" onClick={(e) => go(e, "/#jacobian")}>JACOBIAN</a>
+            <a className={activeKey === "about" ? "is-active" : ""} href="/about" onClick={(e) => go(e, "/about")}>ABOUT</a>
+          </nav>
 
-            {/* Burger */}
+          <div className="site-settings-wrap">
             <button
-              onClick={() => setDropdownOpen((v) => !v)}
-              aria-label="Menu"
-              className="flex h-8 w-8 flex-col items-center justify-center gap-1.5 rounded-full transition-colors cursor-pointer"
+              className={`site-icon-button ${settingsOpen ? "is-active" : ""}`}
+              onClick={() => setSettingsOpen((open) => !open)}
+              aria-label="Open settings"
+              aria-expanded={settingsOpen}
             >
-              <span className="h-px w-4 bg-text" />
-              <span className="h-px w-4 bg-text" />
-              <span className="h-px w-4 bg-text" />
+              <SettingsIcon />
             </button>
-          </div>
 
-          {/* Dropdown — full width of pill, below it */}
-          {dropdownOpen && (
-            <div ref={dropdownRef} className="mt-1 w-full rounded-2xl border border-border py-2 shadow-lg backdrop-blur-md">
-              <Link
-                to="/"
-                onClick={() => {
-                  setDropdownOpen(false);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                className="block px-6 py-2 font-mono text-sm uppercase tracking-nav text-text-muted transition-colors hover:text-text"
-              >
-                FABRIK
-              </Link>
-              <Link
-                to="/#ccd"
-                onClick={() => setDropdownOpen(false)}
-                className="block px-6 py-2 font-mono text-sm uppercase tracking-nav text-text-muted transition-colors hover:text-text"
-              >
-                CCD
-              </Link>
-              <Link
-                to="/#jacobian"
-                onClick={() => setDropdownOpen(false)}
-                className="block px-6 py-2 font-mono text-sm uppercase tracking-nav text-text-muted transition-colors hover:text-text"
-              >
-                Jacobian
-              </Link>
-              <Link
-                to="/about"
-                onClick={() => setDropdownOpen(false)}
-                className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
-                  location.pathname === "/about"
-                    ? "text-text"
-                    : "text-text-muted hover:text-text"
-                }`}
-              >
-                About
-              </Link>
-              <Link
-                to="/styleguide"
-                onClick={() => setDropdownOpen(false)}
-                className={`block px-6 py-2 font-mono text-sm uppercase tracking-nav transition-colors ${
-                  location.pathname === "/styleguide"
-                    ? "text-text"
-                    : "text-text-muted hover:text-text"
-                }`}
-              >
-                Styleguide
-              </Link>
-
-              {/* ── Settings ─────────────────────────────────────────── */}
-              <div className="mt-1 border-t border-border pt-2">
-                {/* Render quality */}
-                <div className="flex items-center justify-between gap-4 px-6 py-2">
-                  <span className="font-mono text-[0.7rem] uppercase tracking-nav text-text-muted">
-                    Render Quality
-                  </span>
-                  <div className="flex rounded-full border border-border p-0.5">
-                    <button
-                      onClick={() => setQuality("high")}
-                      className={`rounded-full px-3 py-1 font-mono text-[0.6rem] uppercase tracking-nav transition-colors ${
-                        quality === "high"
-                          ? "bg-text text-bg"
-                          : "text-text-muted hover:text-text"
-                      }`}
-                    >
-                      High
-                    </button>
-                    <button
-                      onClick={() => setQuality("performance")}
-                      className={`rounded-full px-3 py-1 font-mono text-[0.6rem] uppercase tracking-nav transition-colors ${
-                        quality === "performance"
-                          ? "bg-text text-bg"
-                          : "text-text-muted hover:text-text"
-                      }`}
-                    >
-                      Perf
-                    </button>
+            {settingsOpen && (
+              <div className="site-settings-panel">
+                <div className="site-panel-heading"><span>SETTINGS</span><span>SYS / 01</span></div>
+                <div className="site-setting-row">
+                  <div><strong>Render quality</strong><span>Canvas detail</span></div>
+                  <div className="site-segmented">
+                    <button className={quality === "high" ? "is-active" : ""} onClick={() => setQuality("high")}>HIGH</button>
+                    <button className={quality === "performance" ? "is-active" : ""} onClick={() => setQuality("performance")}>PERF</button>
                   </div>
                 </div>
-
-                {/* Sys display */}
-                <div className="flex items-center justify-between gap-4 px-6 py-2">
-                  <span className="font-mono text-[0.7rem] uppercase tracking-nav text-text-muted">
-                    Sys Display
-                  </span>
-                  <button
-                    onClick={toggleStats}
-                    className={`flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[0.6rem] uppercase tracking-nav transition-colors ${
-                      showStats
-                        ? "border-accent text-accent"
-                        : "border-border text-text-muted hover:text-text"
-                    }`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full transition-colors ${
-                        showStats ? "bg-accent" : "bg-text-muted/50"
-                      }`}
-                    />
-                    {showStats ? "On" : "Off"}
+                <div className="site-setting-row">
+                  <div><strong>System display</strong><span>FPS and GPU data</span></div>
+                  <button className={`site-switch ${showStats ? "is-on" : ""}`} onClick={toggleStats} aria-pressed={showStats}>
+                    <i />
+                    <span>{showStats ? "ON" : "OFF"}</span>
                   </button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </header>
 
-      {/* ── Main ─────────────────────────────── */}
       <main className="flex-1">
-        <Outlet />
+        {children}
       </main>
 
-      {/* ── Footer ───────────────────────────── */}
-      <footer className="border-t border-border bg-surface px-8 py-7">
-        <p className="text-center font-mono text-[0.7rem] uppercase tracking-label text-text-muted">
-            impressum | data privacy | contact:
-        </p>
-      </footer>
+      {page !== "styleguide" && (
+        <footer className="border-t border-border bg-surface px-8 py-7">
+          <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center font-mono text-[0.7rem] uppercase tracking-label text-text-muted">
+            <a href="/imprint" className="transition-colors hover:text-text" onClick={(e) => go(e, "/imprint")}>Imprint</a>
+            <span aria-hidden="true">|</span>
+            <a href="/privacy" className="transition-colors hover:text-text" onClick={(e) => go(e, "/privacy")}>Data privacy</a>
+            <span aria-hidden="true">|</span>
+            <a href="mailto:plagarufus@gmail.com" className="transition-colors hover:text-text">Contact</a>
+          </p>
+        </footer>
+      )}
 
-      {/* ── Site-wide sys overlay ────────────── */}
       <GlobalStatsOverlay />
     </div>
   );

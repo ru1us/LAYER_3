@@ -1,8 +1,8 @@
 import { useRef, Suspense, useState, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useGLTF, useTexture } from "@react-three/drei";
+import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { PauseButton, ControlsPanel, SliderRow } from "./sim";
+import { PauseButton, ControlsPanel, SliderRow, ToggleRow } from "./sim";
 import { useSettings } from "./SettingsContext";
 import { CanvasStatsReporter } from "./CanvasStats";
 
@@ -14,7 +14,7 @@ export interface SimParams {
   followSpeed: number;   // bone slerp factor per frame (0–1)
 }
 export const DEFAULT_SIM_PARAMS: SimParams = {
-  maxBend: Math.PI * 0.25,
+  maxBend: Math.PI * (30 / 180),
   orbitRadius: 1.44,
   forceStrength: 1.0,
   followSpeed: 0.4,
@@ -55,48 +55,45 @@ function solveFABRIKForward(
   }
 }
 
+// ── Camera zoom updater (inside Canvas) ────────────────────────────────────
+function CameraZoom({ zoom }: { zoom: number }) {
+  const { camera } = useThree();
+  useEffect(() => {
+    (camera as THREE.OrthographicCamera).zoom = zoom;
+    (camera as THREE.OrthographicCamera).updateProjectionMatrix();
+  }, [camera, zoom]);
+  return null;
+}
+
 // ── Fish inner scene ───────────────────────────────────────────────────────
 function FishScene({
   ndcMouse,
   mouseInCanvas,
   params,
   shadowEnabled,
-  high,
+  showEffector,
 }: {
   ndcMouse: React.MutableRefObject<THREE.Vector2>;
   mouseInCanvas: React.MutableRefObject<boolean>;
   params: React.MutableRefObject<SimParams>;
   shadowEnabled: boolean;
-  high: boolean;
+  showEffector: boolean;
 }) {
-  const { scene } = useGLTF("/fih.glb");
-  const fishTexture = useTexture("/fishtexture.png");
+  const { scene } = useGLTF("/fish.glb");
   const { camera, scene: r3fScene } = useThree();
 
-  // Textur auf alle SkinnedMesh-Materialien anwenden (nur im High-Quality-Modus)
   useEffect(() => {
-    fishTexture.flipY = false;
-    fishTexture.needsUpdate = true;
     scene.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.castShadow = shadowEnabled;
-      }
-      if (!(obj instanceof THREE.SkinnedMesh)) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach((m) => {
-        const mat = m as THREE.MeshStandardMaterial;
-        mat.map = high ? fishTexture : null;
-        mat.needsUpdate = true;
-      });
+      if (obj instanceof THREE.Mesh) obj.castShadow = shadowEnabled;
     });
-  }, [scene, fishTexture, shadowEnabled, high]);
+  }, [scene, shadowEnabled]);
 
   const spineBones    = useRef<THREE.Bone[]>([]);
   const restQuats     = useRef<THREE.Quaternion[]>([]); // lokale Rest-Quaternions
   const restWorldQ    = useRef<THREE.Quaternion[]>([]); // Welt-Rest-Quaternions
   const bonesReady    = useRef(false);
 
-  const SPINE   = 6; // Bone … Bone005
+  const SPINE   = 13; // Bone … Bone.012
   const joints  = useRef<THREE.Vector2[]>(Array.from({ length: SPINE }, () => new THREE.Vector2()));
   const displayJoints = useRef<THREE.Vector2[]>(Array.from({ length: SPINE }, () => new THREE.Vector2())); // pre-alloc
   const segLens = useRef<number[]>(new Array(SPINE - 1).fill(1));
@@ -106,6 +103,10 @@ function FishScene({
   const prevSpeed    = useRef(0);
   const swimMomentum = useRef(0);
   const wanderAngle  = useRef(0); // Kreisschwimmen wenn Cursor außerhalb
+  const smoothVel     = useRef(new THREE.Vector2()); // EMA velocity for banking
+  const prevSmoothVel = useRef(new THREE.Vector2());
+  const targetRoll    = useRef(0); // heavily smoothed roll target
+  const currentRoll   = useRef(0); // spring-smoothed roll applied to bones
 
   // reusable objects – allocated once
   const _raycaster = useRef(new THREE.Raycaster());
@@ -118,17 +119,17 @@ function FishScene({
     const boneMap: Record<number, THREE.Bone> = {};
     scene.traverse((obj) => {
       if (!(obj instanceof THREE.Bone)) return;
-      const name = obj.name;
-      if (name === "Bone") { boneMap[0] = obj; return; }
-      const m = name.match(/^Bone(\d+)$/);
+      const name = obj.name.trim().toLowerCase();
+      if (name === "bone") { boneMap[0] = obj; return; }
+      const m = name.match(/^bone[._]?(\d{3}|\d+)$/);
       if (!m) return;
       const idx = parseInt(m[1], 10);
-      if (idx <= 5) boneMap[idx] = obj; // skip fins
+      if (idx > 0 && idx < SPINE) boneMap[idx] = obj;
     });
 
-    // Build ordered chain: head (Bone=0) → tail (Bone005=5)
+    // Build ordered chain: head (Bone=0) → tail (Bone.012=12)
     const chain: THREE.Bone[] = [];
-    for (let i = 0; i <= 5; i++) {
+    for (let i = 0; i < SPINE; i++) {
       if (boneMap[i]) chain.push(boneMap[i]);
     }
     if (chain.length < 2) return;
@@ -197,9 +198,18 @@ function FishScene({
     const toTarget = smoothTgt.current.clone().sub(fishPos.current);
     const dist     = toTarget.length();
 
-    // Geschwindigkeit: nah am Cursor → langsam, weit weg → schnell
+    // Normal distance scale: far → faster
     const distFactor = Math.min(dist / ORBIT_R, 1.5);
-    const speedScale = 0.1 + distFactor * 0.7; // auf Orbit-Radius = 0.8×, weit weg = 1.15×
+    let speedScale = 0.12 + distFactor * 0.75;
+
+    // Super-local slowdown only when really close to the EE (catch/hover).
+    // At dist=0 → ~4% speed; fully recovered by ~0.35 world units.
+    const CLOSE_R = 0.75;
+    const closeT = Math.min(dist / CLOSE_R, 1);
+    // smoothstep: holds nearly-stopped zone near the EE, then ramps back up
+    const closeBlend = closeT * closeT * (3 - 2 * closeT);
+    speedScale *= 0.04 + 0.96 * closeBlend;
+
     const MAX_SPEED  = 0.07 * speedScale;
     const MAX_FORCE  = MAX_FORCE_BASE * speedScale;
 
@@ -216,8 +226,10 @@ function FishScene({
       const orbitForce = perp.clone().multiplyScalar(MAX_SPEED * 0.85)
         .addScaledVector(toTarget.clone().normalize(), orbitFactor * MAX_SPEED * 0.4);
 
-      // Blende zwischen Seek (weit weg) und Orbit (in der Nähe)
-      const orbitWeight = Math.max(0, 1 - Math.abs(dist - ORBIT_R) / (ORBIT_R * 2));
+      // Blend Seek ↔ Orbit, but kill orbit influence when sitting on the EE
+      // so hover/catch no longer spins the fish wildly.
+      const orbitWeight =
+        Math.max(0, 1 - Math.abs(dist - ORBIT_R) / (ORBIT_R * 2)) * closeBlend;
       const steerTarget = desired.clone().lerp(orbitForce, orbitWeight);
 
       // Steering = gewünschte Geschwindigkeit - aktuelle
@@ -225,6 +237,14 @@ function FishScene({
       if (steer.length() > MAX_FORCE) steer.normalize().multiplyScalar(MAX_FORCE);
 
       fishVel.current.add(steer);
+    } else {
+      // Exactly on target: bleed residual velocity so it settles instead of looping
+      fishVel.current.multiplyScalar(0.8);
+    }
+
+    // Extra friction while inside the close zone (stabilizes catch/hover)
+    if (dist < CLOSE_R) {
+      fishVel.current.multiplyScalar(0.72 + 0.28 * closeBlend);
     }
 
     // Geschwindigkeit begrenzen
@@ -237,7 +257,43 @@ function FishScene({
     // Momentum aus aktueller Geschwindigkeit
     const speed = fishVel.current.length();
     prevSpeed.current = speed;
-    swimMomentum.current = Math.min(speed / MAX_SPEED, 1);
+    swimMomentum.current = Math.min(speed / Math.max(MAX_SPEED, 1e-6), 1);
+
+    // ── Banking-Roll: smooth lean into corners (no frame-jitter wiggle) ──────
+    // Raw frame-to-frame yaw is noisy (steering micro-corrections). Pipeline:
+    //   1) EMA fish velocity  →  2) signed turn rate  →  3) heavy target EMA
+    //   →  4) slow spring to currentRoll. Same roll on every bone (no twist).
+    const MAX_ROLL = Math.PI * 0.28; // ~50°
+    if (speed > 0.0015) {
+      // Soft-follow raw velocity so steering noise is filtered before angle math
+      smoothVel.current.lerp(fishVel.current, 0.12);
+
+      if (prevSmoothVel.current.lengthSq() > 1e-8 && smoothVel.current.lengthSq() > 1e-8) {
+        const cross = prevSmoothVel.current.x * smoothVel.current.y
+          - prevSmoothVel.current.y * smoothVel.current.x;
+        const dot = prevSmoothVel.current.dot(smoothVel.current);
+        const turnAngle = Math.atan2(cross, dot);
+
+        // Deadzone: ignore micro turns that would read as wobble
+        const DEADZONE = 0.0008;
+        let instant = 0;
+        if (Math.abs(turnAngle) > DEADZONE) {
+          // Gain: still visible on real corners, but not twitchy
+          instant = THREE.MathUtils.clamp(turnAngle * 14, -MAX_ROLL, MAX_ROLL);
+        }
+        // Heavy EMA on the target so direction flips don't pop
+        targetRoll.current = THREE.MathUtils.lerp(targetRoll.current, instant, 0.08);
+      }
+      prevSmoothVel.current.copy(smoothVel.current);
+    } else {
+      smoothVel.current.set(0, 0);
+      prevSmoothVel.current.set(0, 0);
+      targetRoll.current = THREE.MathUtils.lerp(targetRoll.current, 0, 0.06);
+    }
+
+    // Slow spring toward target — one clean lean, no wiggle
+    currentRoll.current = THREE.MathUtils.lerp(currentRoll.current, targetRoll.current, 0.07);
+    currentRoll.current = THREE.MathUtils.clamp(currentRoll.current, -MAX_ROLL, MAX_ROLL);
 
     const fabrikTarget = fishPos.current.clone();
 
@@ -283,8 +339,16 @@ function FishScene({
       const deltaYaw = desiredYaw - restYaw;
 
       // Welt-Zielquaternion = Rest-Weltpose + Delta um Welt-Y
-      const qDelta   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), deltaYaw);
-      const qDesiredWorld = qDelta.clone().multiply(restWorldQ.current[i]);
+      const qDelta = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), deltaYaw);
+      let qDesiredWorld = qDelta.clone().multiply(restWorldQ.current[i]);
+
+      // Same bank angle on every bone → rigid body lean, no relative twist/wiggle.
+      // (Per-bone fade + noisy roll was what made corners shimmer.)
+      if (Math.abs(currentRoll.current) > 1e-5) {
+        const forwardAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(qDesiredWorld);
+        const rollQ = new THREE.Quaternion().setFromAxisAngle(forwardAxis, currentRoll.current);
+        qDesiredWorld = rollQ.multiply(qDesiredWorld);
+      }
 
       // In lokalen Raum umrechnen
       const qLocal   = parentWorldQ.clone().invert().multiply(qDesiredWorld);
@@ -309,10 +373,12 @@ function FishScene({
         </mesh>
       )}
       {/* End-Effector */}
-      <mesh ref={effectorRef}>
-        <sphereGeometry args={[0.1, 10, 10]} />
-        <meshBasicMaterial color="#ffe600" depthTest={false} />
-      </mesh>
+      {showEffector && (
+        <mesh ref={effectorRef}>
+          <sphereGeometry args={[0.1, 10, 10]} />
+          <meshBasicMaterial color="#ffe600" depthTest={false} />
+        </mesh>
+      )}
     </>
   );
 }
@@ -332,9 +398,9 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
   const [paused, setPaused] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [maxBendDeg, setMaxBendDeg] = useState((params.current.maxBend * 180) / Math.PI);
-  const [orbitRadius, setOrbitRadius] = useState(params.current.orbitRadius);
   const [forceStrength, setForceStrength] = useState(params.current.forceStrength);
-  const [followSpeed, setFollowSpeed] = useState(params.current.followSpeed);
+  const [showEffector, setShowEffector] = useState(false);
+  const [zoom, setZoom] = useState(120);
 
   // Shadows follow the global render-quality setting (high quality only).
   const shadowsOn = profile.high;
@@ -344,19 +410,13 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
     params.current.maxBend = (nextDeg * Math.PI) / 180;
   }
 
-  function updateOrbitRadius(next: number) {
-    setOrbitRadius(next);
-    params.current.orbitRadius = next;
-  }
-
   function updateForceStrength(next: number) {
     setForceStrength(next);
     params.current.forceStrength = next;
   }
 
-  function updateFollowSpeed(next: number) {
-    setFollowSpeed(next);
-    params.current.followSpeed = next;
+  function updateZoom(next: number) {
+    setZoom(next);
   }
 
 
@@ -444,19 +504,15 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
             label="Max Bend"
             value={maxBendDeg}
             display={`${maxBendDeg.toFixed(0)}°`}
-            min={10}
-            max={90}
+            min={5}
+            max={60}
             step={1}
             onChange={updateMaxBendDeg}
           />
-          <SliderRow
-            label="Orbit Radius"
-            value={orbitRadius}
-            display={orbitRadius.toFixed(2)}
-            min={0.8}
-            max={3}
-            step={0.01}
-            onChange={updateOrbitRadius}
+          <ToggleRow
+            label="Show End Effector"
+            value={showEffector}
+            onChange={setShowEffector}
           />
           <SliderRow
             label="Force Strength"
@@ -468,13 +524,13 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
             onChange={updateForceStrength}
           />
           <SliderRow
-            label="Follow Speed"
-            value={followSpeed}
-            display={followSpeed.toFixed(2)}
-            min={0.05}
-            max={1}
-            step={0.01}
-            onChange={updateFollowSpeed}
+            label="Zoom"
+            value={zoom}
+            display={zoom.toFixed(0)}
+            min={60}
+            max={200}
+            step={1}
+            onChange={updateZoom}
           />
         </div>
       </ControlsPanel>
@@ -483,8 +539,8 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           {/* Background title with subtle parallax */}
           <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
             <div className="absolute inset-0 flex items-center justify-center px-8">
-              <div ref={bgTitleRef} className="text-center opacity-35 will-change-transform">
-                <h1 className="font-doto text-[10rem] md:text-[13rem] leading-none text-[#111111]">LAYER_3</h1>
+              <div ref={bgTitleRef} className="text-center opacity-70 will-change-transform">
+                <h1 className="font-doto text-[10rem] md:text-[13rem] leading-none text-[#111310]">LAYER_3</h1>
                 <p className="font-mono text-body text-[#444444] mt-4 max-w-120 mx-auto">
                   An interactive introduction to inverse kinematics. Rendered live in the browser with Three.js.
                 </p>
@@ -509,7 +565,7 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           dpr={profile.dpr}
           orthographic
           shadows={shadowsOn}
-          camera={{ position: [0, 200, 0], zoom: 80, near: 1, far: 1000 }}
+          camera={{ position: [0, 200, 0], zoom: 120, near: 1, far: 1000 }}
           gl={{ antialias: profile.antialias, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
           className="relative z-10 w-full h-full"
           onCreated={({ camera, gl }) => {
@@ -518,9 +574,10 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           }}
         >
           <CanvasStatsReporter />
+          <CameraZoom zoom={zoom} />
           <ambientLight intensity={shadowsOn ? 0.38 : 0.6} />
-          <directionalLight position={[0, 10, 5]}  intensity={2.0} color="#ffffff" />
-          <directionalLight position={[0, 10, -5]} intensity={0.6} color="#4488ff" />
+          <directionalLight position={[0, 10, 5]}  intensity={1.0} color="#ffffff" />
+          <directionalLight position={[0, 10, -5]} intensity={0.6} color="#c9ddff" />
           {shadowsOn && (
             <directionalLight
               position={[16, 11, 10]}
@@ -541,7 +598,7 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           )}
 
           <Suspense fallback={null}>
-            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} params={params} shadowEnabled={shadowsOn} high={profile.high} />
+            <FishScene ndcMouse={ndcMouse} mouseInCanvas={mouseInCanvas} params={params} shadowEnabled={shadowsOn} showEffector={showEffector} />
           </Suspense>
         </Canvas>
         </div>

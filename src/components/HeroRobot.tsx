@@ -71,7 +71,7 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
 };
 
 function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high, params }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null>; high: boolean; params: React.MutableRefObject<RobotParams> }) {
-  const gltf = useGLTF("/robot2.glb");
+  const gltf = useGLTF("/robot3.glb");
   const { scene, camera, size, gl } = useThree();
   const glbCamApplied = useRef(false);
 
@@ -129,40 +129,24 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
       }
     }
 
-    // ── Apply roughness map texture to all materials (high quality only) ───────
+    // ── Strip lights baked into the GLB (we use our own lighting setup) ─────
+    const glbLights: THREE.Object3D[] = [];
+    gltf.scene.traverse((obj) => {
+      if ((obj as THREE.Light).isLight) glbLights.push(obj);
+    });
+    for (const light of glbLights) light.parent?.remove(light);
+
+    // ── Ground clipping only — materials come straight from the GLB ──────────
     const ROBOT_GROUND_CLIP = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    if (high) {
-      const textureLoader = new THREE.TextureLoader();
-      textureLoader.load("/metalroughness.png", (roughnessTexture) => {
-        roughnessTexture.colorSpace = THREE.SRGBColorSpace;
-        gltf.scene.traverse((obj) => {
-          const mesh = obj as THREE.Mesh;
-          if (mesh.isMesh && mesh.material) {
-            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            materials.forEach((mat) => {
-              if ("roughness" in mat) {
-                (mat as any).roughnessMap = roughnessTexture;
-                (mat as any).roughness = 1.0;
-              }
-              (mat as any).clippingPlanes = [ROBOT_GROUND_CLIP];
-              mat.needsUpdate = true;
-            });
-          }
-        });
+    gltf.scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.material) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      materials.forEach((mat) => {
+        (mat as THREE.Material & { clippingPlanes?: THREE.Plane[] }).clippingPlanes = [ROBOT_GROUND_CLIP];
+        mat.needsUpdate = true;
       });
-    } else {
-      // Performance: no roughness map, keep clipping planes for the ground cut.
-      gltf.scene.traverse((obj) => {
-        const mesh = obj as THREE.Mesh;
-        if (mesh.isMesh && mesh.material) {
-          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          materials.forEach((mat) => {
-            (mat as any).clippingPlanes = [ROBOT_GROUND_CLIP];
-            mat.needsUpdate = true;
-          });
-        }
-      });
-    }
+    });
 
     // ── Find bone chain ──────────────────────────────────────────────────────
     const nameMap = new Map<string, THREE.Object3D>();
@@ -342,10 +326,11 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
       if (crosshairRef.current)  crosshairRef.current.style.opacity = "0";
     }
 
-    const isIdle = isRestMode.current || isInactive.current;
+    const freezeOnInactive = isInactive.current && !isRestMode.current;
+    const isIdle = isRestMode.current || freezeOnInactive;
 
     if (isIdle && !wasIdle.current) {
-      ee.getWorldPosition(frozenEEPos.current);
+      if (freezeOnInactive) ee.getWorldPosition(frozenEEPos.current);
       idleTime.current = 0;
     }
     wasIdle.current = isIdle;
@@ -368,12 +353,12 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
       smoothTarget.current.y = Math.max(smoothTarget.current.y, 0);
     }
 
-    const ikTarget = isInactive.current ? frozenEEPos.current : smoothTarget.current;
+    const ikTarget = freezeOnInactive ? frozenEEPos.current : smoothTarget.current;
 
     // Lift – reuse pre-alloc liftedIkTarget vector
     const lag  = smoothTarget.current.distanceTo(v.target);
     const lift = Math.min(lag * 0.3, 0.06);
-    if (lift > 0.001 && !isInactive.current) {
+    if (lift > 0.001 && !freezeOnInactive) {
       ray.liftedIkTarget.copy(ikTarget).setY(ikTarget.y + lift);
     } else {
       ray.liftedIkTarget.copy(ikTarget);
@@ -458,7 +443,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
       if (!cfg) continue;
 
       const baseSpeed = (BONE_FOLLOW[joint.name] ?? 0.06) * params.current.jointFollow;
-      const speed   = isInactive.current
+      const speed   = freezeOnInactive
         ? Math.min(baseSpeed * 4, 1)
         : Math.min(baseSpeed, 1);
       const current = _savedAngles.current[idx];
@@ -479,7 +464,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
 
     // ── Crosshair ──────────────────────────────────────────────────────────
     if (crosshairRef.current) {
-      const projPos = isInactive.current ? frozenEEPos.current : eeWorldPos.current;
+      const projPos = freezeOnInactive ? frozenEEPos.current : eeWorldPos.current;
       const proj = projPos.clone().project(camera);
       const x = (proj.x + 1) / 2 * size.width;
       const y = (-proj.y + 1) / 2 * size.height;
@@ -490,11 +475,13 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
 
   return (
     <>
-      {/* High quality: image-based studio env. Performance: cheap analytic lights. */}
+      {/* High quality: studio HDRI + soft key light. Performance: analytic lights only. */}
       {high ? (
         <>
-          <Environment preset="studio" environmentIntensity={0.6} />
-          <ambientLight intensity={0.01} color="#ffffff" />
+          <ambientLight intensity={0.25} color="#ffffff" />
+          <directionalLight position={[6, 10, 4]} intensity={0.55} color="#ffffff" />
+          <directionalLight position={[-4, 3, -2]} intensity={0.2} color="#d0e0ff" />
+          <Environment preset="studio" environmentIntensity={0.5} />
         </>
       ) : (
         <>
