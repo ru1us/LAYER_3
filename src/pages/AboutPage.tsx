@@ -95,7 +95,7 @@ export default function AboutPage() {
           </div>
           <h1 className="m-0 font-doto text-[clamp(3rem,8vw,7rem)] font-black uppercase leading-[0.82] tracking-[-0.045em]">IK as a visual introduction.</h1>
           <p className="mt-6 max-w-2xl text-[0.84rem] leading-[1.85] text-text-muted">
-            This website is a small learning space for inverse kinematics: how a chain of joints can reach a target, how constraints shape motion, and how interactive 3D scenes can make those ideas easier to understand. It also serves as a practical study in Three.js, React Three Fiber, GLTF rigs, pointer interaction, animation loops, and browser-based realtime graphics.
+            This website is a small interactive playground for inverse kinematics: how a chain of joints can reach a target, how constraints shape motion, and how interactive 3D scenes can make those ideas easier to understand. It also serves as a practical study in Three.js, React Three Fiber, GLTF rigs, pointer interaction, animation loops, and browser-based realtime graphics.
           </p>
           <div className="mt-8 flex max-w-md flex-wrap border border-text bg-text gap-px">
             {[

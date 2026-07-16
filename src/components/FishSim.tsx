@@ -107,6 +107,10 @@ function FishScene({
   const prevSmoothVel = useRef(new THREE.Vector2());
   const targetRoll    = useRef(0); // heavily smoothed roll target
   const currentRoll   = useRef(0); // spring-smoothed roll applied to bones
+  // How long the cursor has been in the catch/hover zone near the EE
+  const closeHoldTime = useRef(0);
+  // True after hold threshold met → keep pushing until cursor leaves zone
+  const pushAwayActive = useRef(false);
 
   // reusable objects – allocated once
   const _raycaster = useRef(new THREE.Raycaster());
@@ -171,9 +175,8 @@ function FishScene({
   // End-Effector-Visualisierung
   const effectorRef = useRef<THREE.Mesh>(null!);
 
-  useFrame((state) => {
+  useFrame((_state, delta) => {
     if (!bonesReady.current) { initBones(); return; }
-    void state.clock.elapsedTime; // unused but kept for future use
 
     // ── Steering Behavior (Nature of Code) ───────────────────────────────
     _raycaster.current.setFromCamera(ndcMouse.current, camera);
@@ -198,22 +201,45 @@ function FishScene({
     const toTarget = smoothTgt.current.clone().sub(fishPos.current);
     const dist     = toTarget.length();
 
+    // ── Hover on EE → after 0.5s push fish (EE) away from cursor ─────────
+    const CLOSE_R = 0.75;
+    const PUSH_HOLD_S = 0.5;
+    const dt = Math.min(delta, 0.05); // clamp frame spikes
+    if (mouseInCanvas.current && dist < CLOSE_R) {
+      closeHoldTime.current += dt;
+      if (closeHoldTime.current >= PUSH_HOLD_S) pushAwayActive.current = true;
+    } else {
+      closeHoldTime.current = 0;
+      pushAwayActive.current = false;
+    }
+
     // Normal distance scale: far → faster
     const distFactor = Math.min(dist / ORBIT_R, 1.5);
     let speedScale = 0.12 + distFactor * 0.75;
 
     // Super-local slowdown only when really close to the EE (catch/hover).
     // At dist=0 → ~4% speed; fully recovered by ~0.35 world units.
-    const CLOSE_R = 0.75;
+    // Skip slowdown while actively pushing away so the fish can leave.
     const closeT = Math.min(dist / CLOSE_R, 1);
     // smoothstep: holds nearly-stopped zone near the EE, then ramps back up
     const closeBlend = closeT * closeT * (3 - 2 * closeT);
-    speedScale *= 0.04 + 0.96 * closeBlend;
+    if (!pushAwayActive.current) {
+      speedScale *= 0.04 + 0.96 * closeBlend;
+    }
 
     const MAX_SPEED  = 0.07 * speedScale;
     const MAX_FORCE  = MAX_FORCE_BASE * speedScale;
 
-    if (dist > 0.001) {
+    if (pushAwayActive.current && dist > 0.001) {
+      // Flee: shove EE away from cursor after prolonged hover
+      const fleeDir = toTarget.clone().normalize().multiplyScalar(-1);
+      const pushSpeed = 0.09 * params.current.forceStrength;
+      const desired = fleeDir.multiplyScalar(pushSpeed);
+      const steer = desired.sub(fishVel.current);
+      const pushMaxForce = MAX_FORCE_BASE * 4;
+      if (steer.length() > pushMaxForce) steer.normalize().multiplyScalar(pushMaxForce);
+      fishVel.current.add(steer);
+    } else if (dist > 0.001) {
       // Seek: je weiter weg, desto stärker anziehen
       const seekStrength = Math.min(dist / 8, 1);
       const desired = toTarget.clone().normalize().multiplyScalar(MAX_SPEED * seekStrength);
@@ -243,13 +269,17 @@ function FishScene({
     }
 
     // Extra friction while inside the close zone (stabilizes catch/hover)
-    if (dist < CLOSE_R) {
+    // Not while pushing away — fish needs to leave cleanly.
+    if (!pushAwayActive.current && dist < CLOSE_R) {
       fishVel.current.multiplyScalar(0.72 + 0.28 * closeBlend);
     }
 
-    // Geschwindigkeit begrenzen
-    if (fishVel.current.length() > MAX_SPEED) {
-      fishVel.current.normalize().multiplyScalar(MAX_SPEED);
+    // Geschwindigkeit begrenzen (higher cap during push so flee is visible)
+    const speedCap = pushAwayActive.current
+      ? 0.09 * params.current.forceStrength
+      : MAX_SPEED;
+    if (fishVel.current.length() > speedCap) {
+      fishVel.current.normalize().multiplyScalar(speedCap);
     }
 
     fishPos.current.add(fishVel.current);

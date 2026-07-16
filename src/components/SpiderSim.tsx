@@ -245,9 +245,11 @@ function solveOneLeg(leg: LegData, maxBend: number): void {
 function SpiderModel({
   mouseNDC,
   params,
+  high,
 }: {
   mouseNDC: React.RefObject<THREE.Vector2>;
   params: React.MutableRefObject<SpiderParams>;
+  high: boolean;
 }) {
   const gltf = useGLTF("/spider3.glb");
   const gl = useThree((s) => s.gl);
@@ -255,9 +257,17 @@ function SpiderModel({
   // Soften matte materials so the studio HDRI actually shows up in reflections.
   // NonColor maps on roughness/metalness are correct — they are not the issue.
   useEffect(() => {
+    // Strip lights baked into the GLB (we use our own lighting setup)
+    const glbLights: THREE.Object3D[] = [];
+    gltf.scene.traverse((obj) => {
+      if ((obj as THREE.Light).isLight) glbLights.push(obj);
+    });
+    for (const light of glbLights) light.parent?.remove(light);
+
     gltf.scene.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh || !mesh.material) return;
+      mesh.castShadow = high;
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const mat of mats) {
         const m = mat as THREE.MeshStandardMaterial;
@@ -270,7 +280,7 @@ function SpiderModel({
         m.needsUpdate = true;
       }
     });
-  }, [gltf.scene]);
+  }, [gltf.scene, high]);
 
   // Measure floor height from the GLB ground, but keep it invisible —
   // the scene uses the flat gray background + grid instead.
@@ -504,44 +514,59 @@ export default function SpiderSim() {
         gl={{
           antialias: profile.antialias,
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.1,
+          toneMappingExposure: 0.8,
         }}
         style={{ width: "100%", height: "100%" }}
       >
         <CanvasStatsReporter />
         {/* ── Always-visible scene scaffold ─────────────────────────────── */}
         <color attach="background" args={["#F5F5F5"]} />
-        {/* High quality: studio HDRI + soft key light. Performance: analytic lights only. */}
+        {/* High: back key + fill + studio HDRI + contact shadow.
+            Perf: cheap analytic lights only — no shadows, no Environment. */}
         {profile.high ? (
           <>
             <ambientLight intensity={0.25} color="#ffffff" />
-            <directionalLight position={[6, 10, 4]} intensity={0.55} color="#ffffff" />
-            <directionalLight position={[-4, 3, -2]} intensity={0.2} color="#d0e0ff" />
+            {/* Key from behind — same setup as HeroRobot */}
+            <directionalLight
+              position={[-4, 11, -6]}
+              intensity={0.65}
+              color="#ffffff"
+              castShadow
+              shadow-mapSize-width={2048}
+              shadow-mapSize-height={2048}
+              shadow-bias={-0.0004}
+              shadow-normalBias={0.02}
+              shadow-camera-near={0.5}
+              shadow-camera-far={40}
+              shadow-camera-left={-12}
+              shadow-camera-right={12}
+              shadow-camera-top={12}
+              shadow-camera-bottom={-12}
+            />
+            <directionalLight position={[5, 4, 3]} intensity={0.22} color="#d0e0ff" />
             <Suspense fallback={null}>
-              {/* warehouse has stronger specular contrast than studio (softboxes / windows) */}
               <Environment preset="studio" environmentIntensity={0.5} />
             </Suspense>
+            {/* Invisible floor that only receives shadows */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.25, 0]} receiveShadow>
+              <planeGeometry args={[40, 40]} />
+              <shadowMaterial transparent opacity={0.35} />
+            </mesh>
           </>
         ) : (
           <>
             <ambientLight intensity={0.7} color="#ffffff" />
             <hemisphereLight intensity={0.9} color="#ffffff" groundColor="#cccccc" />
-            <directionalLight position={[5, 8, 5]} intensity={1.1} color="#ffffff" />
+            <directionalLight position={[-4, 11, -6]} intensity={1.0} color="#ffffff" />
           </>
         )}
 
         {/* Grid — visible immediately, confirms canvas is rendering */}
         <gridHelper args={[60, 15, "#BBBBBB", "#DDDDDD"]} position={[0, -2.251, 0]} />
 
-        {/* Ground */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.251, 0]} visible={false} receiveShadow>
-          <planeGeometry args={[40, 40]} />
-          <meshStandardMaterial color="#111111" roughness={1} metalness={0} />
-        </mesh>
-
         {/* ── Spider model — suspends until spider.glb is ready ───────────── */}
         <Suspense fallback={null}>
-          <SpiderModel mouseNDC={mouseNDC} params={params} />
+          <SpiderModel mouseNDC={mouseNDC} params={params} high={profile.high} />
         </Suspense>
       </Canvas>
 

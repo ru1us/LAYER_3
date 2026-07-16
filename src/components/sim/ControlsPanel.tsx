@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 /**
  * ControlsPanel – reusable shell for sim parameter panels.
@@ -13,19 +13,23 @@ export function ControlsPanel({
   open,
   onToggle,
   title = "Simulation Controls",
+  panelClassName = "",
+  panelStyle,
   children,
 }: {
   open: boolean;
   onToggle: () => void;
   title?: string;
+  panelClassName?: string;
+  panelStyle?: CSSProperties;
   children: ReactNode;
 }) {
   return (
     <div className="absolute bottom-6 left-1/2 z-30 flex w-[min(92vw,680px)] -translate-x-1/2 flex-col items-center">
       {open && (
         <div
-          className="mb-3 w-full rounded-[10px] border border-text bg-surface-raised p-6 max-h-[42vh] overflow-y-auto"
-          style={{ boxShadow: "0 8px 24px rgba(17, 19, 16, 0.12)" }}
+          className={`mb-3 w-full rounded-[10px] border border-text bg-surface-raised p-6 max-h-[42vh] overflow-y-auto ${panelClassName}`}
+          style={{ boxShadow: "0 8px 24px rgba(17, 19, 16, 0.12)", ...panelStyle }}
         >
           {children}
         </div>

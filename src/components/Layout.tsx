@@ -85,6 +85,8 @@ export default function Layout({
     if (hash) {
       const target = document.getElementById(decodeURIComponent(hash.slice(1)));
       if (target) {
+        // CCD/Jacobian use scroll-mt-0 so the full-viewport canvas fills the screen.
+        // Text sections use scroll-mt-28 via CSS scroll-margin.
         requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
         return;
       }

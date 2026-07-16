@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Physics, RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
 import * as THREE from "three";
 import { BallModel } from "./BallModel";
-import { PauseButton, ControlsPanel, SliderRow } from "./sim";
+import { PauseButton, ControlsPanel, SliderRow, ToggleRow } from "./sim";
 import { useSettings } from "./SettingsContext";
 import { CanvasStatsReporter } from "./CanvasStats";
 
@@ -42,17 +42,42 @@ const DEFAULT_TARGET    = new THREE.Vector3(-0.5, 0.1, 0.25);
 const IDLE_BLEND_SPEED  = 0.6; // ramp speed for idle in/out
 const IDLE_BASE_AMP     = 0.3; // how much the base sweeps in radians // default rest pose
 
+type RotationAxis = "x" | "y" | "z";
+type KinematicsMode = "ik" | "fk";
+type AxisValues<T> = Record<RotationAxis, T>;
+
 interface RobotParams {
   targetSmooth: number;
   jointFollow: number;
   idleLean: number;
+  /** Multiplier on per-joint rotation clamps (0.3 = stiff, 1.5 = very flexible). */
+  maxBend: number;
+  axisBend: AxisValues<number>;
+  axisLocked: AxisValues<boolean>;
+  mode: KinematicsMode;
+  fkAngles: Record<string, number>;
 }
 
 const DEFAULT_ROBOT_PARAMS: RobotParams = {
   targetSmooth: TARGET_SMOOTH,
   jointFollow: 1,
   idleLean: IDLE_BASE_AMP,
+  maxBend: 1,
+  axisBend: { x: 1, y: 1, z: 1 },
+  axisLocked: { x: false, y: false, z: false },
+  mode: "ik",
+  fkAngles: {},
 };
+
+/** Scale a bone's angle limits by maxBend; leave open axes unbounded. */
+function scaledLimits(config: BoneConfig, params: RobotParams): [number, number] {
+  if (params.axisLocked[config.axis]) return [0, 0];
+  const scale = params.maxBend * params.axisBend[config.axis];
+  return [
+    Number.isFinite(config.min) ? config.min * scale : config.min,
+    Number.isFinite(config.max) ? config.max * scale : config.max,
+  ];
+}
 
 const BONE_CONFIG: Record<string, BoneConfig> = {
   // Base turntable
@@ -70,7 +95,18 @@ const BONE_CONFIG: Record<string, BoneConfig> = {
   "endeffector": { axis: "z", min: -Infinity, max: Infinity },
 };
 
-function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high, params }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null>; high: boolean; params: React.MutableRefObject<RobotParams> }) {
+const ROTATION_AXES: RotationAxis[] = ["x", "y", "z"];
+const FK_JOINTS = [
+  { name: "Bone", label: "Base" },
+  { name: "Bone001", label: "Shoulder" },
+  { name: "Bone002", label: "Upper Arm" },
+  { name: "Bone003", label: "Elbow" },
+  { name: "Bone004", label: "Forearm" },
+  { name: "Bone005", label: "Wrist" },
+  { name: "Bone006", label: "Tool" },
+];
+
+function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high, params, onFkAnglesCaptured }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null>; high: boolean; params: React.MutableRefObject<RobotParams>; onFkAnglesCaptured: (angles: Record<string, number>) => void }) {
   const gltf = useGLTF("/robot3.glb");
   const { scene, camera, size, gl } = useThree();
   const glbCamApplied = useRef(false);
@@ -136,11 +172,12 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
     });
     for (const light of glbLights) light.parent?.remove(light);
 
-    // ── Ground clipping only — materials come straight from the GLB ──────────
+    // ── Ground clipping + cast shadows ──────────────────────────────────────
     const ROBOT_GROUND_CLIP = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     gltf.scene.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh || !mesh.material) return;
+      mesh.castShadow = high;
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       materials.forEach((mat) => {
         (mat as THREE.Material & { clippingPlanes?: THREE.Plane[] }).clippingPlanes = [ROBOT_GROUND_CLIP];
@@ -249,6 +286,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
   const _allJoints    = useRef<THREE.Object3D[]>([]);
   const _savedAngles  = useRef<number[]>([]);
   const _goalAngles   = useRef<number[]>([]);
+  const previousMode  = useRef<KinematicsMode>(params.current.mode);
 
   // Smooth IK target that lags behind the cursor
   const smoothTarget = useRef(new THREE.Vector3(-0.2, 0.1, 0.15)); // init to default
@@ -290,6 +328,37 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
     base.getWorldPosition(v.basePos);
     groundY.current = v.basePos.y;
     groundPlane.current.set(new THREE.Vector3(0, 1, 0), -BALL_RADIUS);
+
+    if (params.current.mode === "fk") {
+      if (previousMode.current !== "fk") {
+        const capturedAngles: Record<string, number> = {};
+        for (const joint of allJoints) {
+          const config = boneConfigRef.current.get(joint);
+          if (config) capturedAngles[joint.name] = joint.rotation[config.axis];
+        }
+        params.current.fkAngles = capturedAngles;
+        onFkAnglesCaptured(capturedAngles);
+      }
+
+      for (const joint of allJoints) {
+        const config = boneConfigRef.current.get(joint);
+        if (!config) continue;
+        const [min, max] = scaledLimits(config, params.current);
+        const targetAngle = params.current.fkAngles[joint.name] ?? joint.rotation[config.axis];
+        joint.rotation[config.axis] = THREE.MathUtils.clamp(targetAngle, min, max);
+      }
+      base.updateWorldMatrix(true, true);
+      ee.getWorldPosition(eeWorldPos.current);
+      baseWorldPos.current.copy(v.basePos);
+      if (containerRef.current) containerRef.current.style.cursor = "auto";
+      if (crosshairRef.current) crosshairRef.current.style.opacity = "0";
+      previousMode.current = "fk";
+      return;
+    }
+    if (previousMode.current === "fk" && containerRef.current) {
+      containerRef.current.style.cursor = isRestMode.current ? "auto" : "none";
+    }
+    previousMode.current = "ik";
 
     // Back plane – reuse pre-allocated vectors
     camera.getWorldDirection(ray.camDir);
@@ -376,7 +445,8 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
     if (base.parent && baseConfig) {
       const localTarget = base.parent.worldToLocal(liftedIkTarget.clone());
       const desired = Math.atan2(localTarget.x - base.position.x, localTarget.z - base.position.z);
-      base.rotation[baseConfig.axis] = THREE.MathUtils.clamp(desired, baseConfig.min, baseConfig.max);
+      const [bMin, bMax] = scaledLimits(baseConfig, params.current);
+      base.rotation[baseConfig.axis] = THREE.MathUtils.clamp(desired, bMin, bMax);
       if (idleBlend.current > 0) {
         const t = idleTime.current;
         const raw = Math.sin(t * 0.3);
@@ -423,8 +493,9 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
         ccd.cross.crossVectors(ccd.eeProj, ccd.targetProj);
         if (ccd.cross.dot(ccd.axisWorld) < 0) angle = -angle;
 
+        const [jMin, jMax] = scaledLimits(config, params.current);
         joint.rotation[config.axis] = THREE.MathUtils.clamp(
-          joint.rotation[config.axis] + angle, config.min, config.max,
+          joint.rotation[config.axis] + angle, jMin, jMax,
         );
         joint.updateWorldMatrix(true, true);
       }
@@ -453,8 +524,9 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
       diff = ((diff + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
       goal = current + diff;
 
+      const [lMin, lMax] = scaledLimits(cfg, params.current);
       joint.rotation[cfg.axis] = THREE.MathUtils.clamp(
-        THREE.MathUtils.lerp(current, goal, speed), cfg.min, cfg.max,
+        THREE.MathUtils.lerp(current, goal, speed), lMin, lMax,
       );
     }
 
@@ -475,19 +547,42 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
 
   return (
     <>
-      {/* High quality: studio HDRI + soft key light. Performance: analytic lights only. */}
+      {/* High: back key + fill + studio HDRI + contact shadow.
+          Perf: cheap analytic lights only — no shadows, no Environment.
+          (Ambient alone blacks out metallic PBR materials.) */}
       {high ? (
         <>
           <ambientLight intensity={0.25} color="#ffffff" />
-          <directionalLight position={[6, 10, 4]} intensity={0.55} color="#ffffff" />
-          <directionalLight position={[-4, 3, -2]} intensity={0.2} color="#d0e0ff" />
+          {/* Key from behind (camera sits at +X/+Z ≈ [4,3,5]) */}
+          <directionalLight
+            position={[-4, 11, -6]}
+            intensity={0.65}
+            color="#ffffff"
+            castShadow
+            shadow-mapSize-width={2048}
+            shadow-mapSize-height={2048}
+            shadow-bias={-0.0004}
+            shadow-normalBias={0.02}
+            shadow-camera-near={0.5}
+            shadow-camera-far={30}
+            shadow-camera-left={-4}
+            shadow-camera-right={4}
+            shadow-camera-top={4}
+            shadow-camera-bottom={-4}
+          />
+          <directionalLight position={[5, 4, 3]} intensity={0.22} color="#d0e0ff" />
           <Environment preset="studio" environmentIntensity={0.5} />
+          {/* Invisible floor that only receives shadows (same trick as FishSim) */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} receiveShadow>
+            <planeGeometry args={[20, 20]} />
+            <shadowMaterial transparent opacity={0.35} />
+          </mesh>
         </>
       ) : (
         <>
           <ambientLight intensity={0.7} color="#ffffff" />
           <hemisphereLight intensity={0.9} color="#ffffff" groundColor="#cccccc" />
-          <directionalLight position={[5, 8, 5]} intensity={1.1} color="#ffffff" />
+          <directionalLight position={[-4, 11, -6]} intensity={1.0} color="#ffffff" />
         </>
       )}
       <primitive object={gltf.scene} />
@@ -722,12 +817,23 @@ export default function HeroRobot() {
   const mouseDown = useRef(false);
   const crosshairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const params = useRef<RobotParams>({ ...DEFAULT_ROBOT_PARAMS });
+  const params = useRef<RobotParams>({
+    ...DEFAULT_ROBOT_PARAMS,
+    axisBend: { ...DEFAULT_ROBOT_PARAMS.axisBend },
+    axisLocked: { ...DEFAULT_ROBOT_PARAMS.axisLocked },
+    fkAngles: {},
+  });
   const [paused, setPaused] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [controlsPage, setControlsPage] = useState<"main" | "bend">("main");
+  const [mode, setMode] = useState<KinematicsMode>(params.current.mode);
   const [targetSmooth, setTargetSmooth] = useState(params.current.targetSmooth);
   const [jointFollow, setJointFollow] = useState(params.current.jointFollow);
   const [idleLean, setIdleLean] = useState(params.current.idleLean);
+  const [maxBend, setMaxBend] = useState(params.current.maxBend);
+  const [axisBend, setAxisBend] = useState<AxisValues<number>>({ ...params.current.axisBend });
+  const [axisLocked, setAxisLocked] = useState<AxisValues<boolean>>({ ...params.current.axisLocked });
+  const [fkAngles, setFkAngles] = useState<Record<string, number>>({});
 
   const maxBalls = profile.high ? MAX_BALLS_HIGH : MAX_BALLS_PERF;
 
@@ -746,6 +852,7 @@ export default function HeroRobot() {
     <div ref={containerRef} className="w-full h-full cursor-none">
       <Canvas
         frameloop={paused ? "never" : "always"}
+        shadows={profile.high}
         dpr={profile.dpr}
         camera={{ position: [4, 3, 5], fov: 45, near: 0.1, far: 500 }}
         gl={{
@@ -757,7 +864,7 @@ export default function HeroRobot() {
       >
         <CanvasStatsReporter />
         <Physics gravity={[0, -9.81, 0]}>
-          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} high={profile.high} params={params} />
+          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} high={profile.high} params={params} onFkAnglesCaptured={setFkAngles} />
           {/* Grid floor */}
           <gridHelper args={[10, 10, "#BBBBBB", "#DDDDDD"]} position={[0, 0, 0]} />
           {/* Ground collider – cut at back edge so balls roll off */}
@@ -784,45 +891,181 @@ export default function HeroRobot() {
         </svg>
       </div>
 
-      <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
-        <div className="grid md:grid-cols-3 gap-4">
-          <SliderRow
-            label="Target Smooth"
-            value={targetSmooth}
-            display={targetSmooth.toFixed(2)}
-            min={0.02}
-            max={0.25}
-            step={0.01}
-            onChange={(v) => {
-              setTargetSmooth(v);
-              params.current.targetSmooth = v;
-            }}
-          />
-          <SliderRow
-            label="Joint Follow"
-            value={jointFollow}
-            display={`${jointFollow.toFixed(1)}×`}
-            min={0.4}
-            max={3}
-            step={0.1}
-            onChange={(v) => {
-              setJointFollow(v);
-              params.current.jointFollow = v;
-            }}
-          />
-          <SliderRow
-            label="Idle Lean"
-            value={idleLean}
-            display={`${((idleLean * 180) / Math.PI).toFixed(0)}°`}
-            min={0}
-            max={0.8}
-            step={0.01}
-            onChange={(v) => {
-              setIdleLean(v);
-              params.current.idleLean = v;
-            }}
-          />
-        </div>
+      <ControlsPanel
+        open={showControls}
+        onToggle={() => {
+          if (showControls) setControlsPage("main");
+          setShowControls((v) => !v);
+        }}
+        panelStyle={mode === "fk" ? { backgroundColor: "rgba(245, 245, 245, 0.2)" } : undefined}
+      >
+        {controlsPage === "main" ? (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 rounded-[8px] border border-text p-1">
+              {(["ik", "fk"] as KinematicsMode[]).map((nextMode) => (
+                <button
+                  key={nextMode}
+                  type="button"
+                  onClick={() => {
+                    setMode(nextMode);
+                    params.current.mode = nextMode;
+                  }}
+                  className={`cursor-pointer rounded-[5px] px-4 py-2 font-mono text-[0.63rem] font-bold uppercase tracking-[0.12em] transition-colors ${mode === nextMode ? "bg-text text-accent" : "text-text-muted hover:text-text"}`}
+                >
+                  {nextMode === "ik" ? "Inverse Kinematics" : "Forward Kinematics"}
+                </button>
+              ))}
+            </div>
+
+            {mode === "ik" ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <SliderRow
+                  label="Target Smooth"
+                  value={targetSmooth}
+                  display={targetSmooth.toFixed(2)}
+                  min={0.02}
+                  max={0.25}
+                  step={0.01}
+                  onChange={(v) => {
+                    setTargetSmooth(v);
+                    params.current.targetSmooth = v;
+                  }}
+                />
+                <SliderRow
+                  label="Joint Follow"
+                  value={jointFollow}
+                  display={`${jointFollow.toFixed(1)}×`}
+                  min={0.4}
+                  max={3}
+                  step={0.1}
+                  onChange={(v) => {
+                    setJointFollow(v);
+                    params.current.jointFollow = v;
+                  }}
+                />
+                <SliderRow
+                  label="Idle Lean"
+                  value={idleLean}
+                  display={`${((idleLean * 180) / Math.PI).toFixed(0)}°`}
+                  min={0}
+                  max={0.8}
+                  step={0.01}
+                  onChange={(v) => {
+                    setIdleLean(v);
+                    params.current.idleLean = v;
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                {FK_JOINTS.map(({ name, label }) => {
+                  const config = BONE_CONFIG[name];
+                  if (!config || (Object.keys(fkAngles).length > 0 && !(name in fkAngles))) return null;
+                  if (axisLocked[config.axis]) {
+                    return (
+                      <div key={name} className="rounded-[8px] border border-border px-3 py-2 font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-text-muted">
+                        <div className="flex justify-between"><span>{label}</span><span>{config.axis.toUpperCase()} locked</span></div>
+                      </div>
+                    );
+                  }
+                  const scale = maxBend * axisBend[config.axis];
+                  const min = Number.isFinite(config.min) ? config.min * scale : -Math.PI;
+                  const max = Number.isFinite(config.max) ? config.max * scale : Math.PI;
+                  const value = THREE.MathUtils.clamp(fkAngles[name] ?? 0, min, max);
+                  if (min === max) {
+                    return (
+                      <div key={name} className="rounded-[8px] border border-border px-3 py-2 font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-text-muted">
+                        <div className="flex justify-between"><span>{label}</span><span>0° fixed</span></div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <SliderRow
+                      key={name}
+                      label={`${label} · ${config.axis.toUpperCase()}`}
+                      value={value}
+                      display={`${THREE.MathUtils.radToDeg(value).toFixed(0)}°`}
+                      min={min}
+                      max={max}
+                      step={THREE.MathUtils.degToRad(1)}
+                      onChange={(v) => {
+                        const next = { ...fkAngles, [name]: v };
+                        setFkAngles(next);
+                        params.current.fkAngles = next;
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setControlsPage("bend")}
+              className="flex w-full cursor-pointer items-center justify-between rounded-[8px] border border-text px-4 py-3 text-left transition-colors hover:bg-surface-hover"
+            >
+              <span className="font-mono text-[0.63rem] font-bold uppercase tracking-[0.12em]">Max Bend</span>
+              <span className="flex items-center gap-3 font-mono text-[0.63rem] font-bold text-text-muted">
+                {(maxBend * 100).toFixed(0)}%
+                <span className="font-doto text-lg text-text">→</span>
+              </span>
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <button
+              type="button"
+              onClick={() => setControlsPage("main")}
+              className="flex cursor-pointer items-center gap-2 font-mono text-[0.63rem] font-bold uppercase tracking-[0.12em] text-text-muted transition-colors hover:text-text"
+              aria-label="Back to simulation controls"
+            >
+              <span className="font-doto text-lg leading-none">←</span>
+              Bend Controls
+            </button>
+
+            <SliderRow
+              label="Overall Max Bend"
+              value={maxBend}
+              display={`${(maxBend * 100).toFixed(0)}%`}
+              min={0.3}
+              max={1}
+              step={0.05}
+              onChange={(v) => {
+                setMaxBend(v);
+                params.current.maxBend = v;
+              }}
+            />
+
+            <div className="grid gap-x-6 gap-y-5 md:grid-cols-3">
+              {ROTATION_AXES.map((axis) => (
+                <div key={axis} className="space-y-4 rounded-[8px] border border-border p-3">
+                  <ToggleRow
+                    label={`Lock ${axis.toUpperCase()} Axis`}
+                    value={axisLocked[axis]}
+                    onChange={(value) => {
+                      const next = { ...axisLocked, [axis]: value };
+                      setAxisLocked(next);
+                      params.current.axisLocked = next;
+                    }}
+                  />
+                  <SliderRow
+                    label={`${axis.toUpperCase()} Bend`}
+                    value={axisBend[axis]}
+                    display={`${(axisBend[axis] * 100).toFixed(0)}%`}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onChange={(value) => {
+                      const next = { ...axisBend, [axis]: value };
+                      setAxisBend(next);
+                      params.current.axisBend = next;
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </ControlsPanel>
 
       {/* Pause button */}

@@ -9,6 +9,8 @@ export interface AlgorithmCopy {
   homeIntro: string;
   homeMethodTitle: string;
   homeMethod: string;
+  /** Optional extra topic blocks between method and steps */
+  homeTopics?: { title: string; text: string }[];
   homeSteps: string[];
   homeStats: { label: string; value: string }[];
   detailSections: { label: string; text: string }[];
@@ -16,7 +18,7 @@ export interface AlgorithmCopy {
 
 export const algorithmContent: Record<AlgorithmKey, AlgorithmCopy> = {
   fabrik: {
-    number: "02",
+    number: "01",
     title: "FABRIK",
     shortLabel: "position-based fish spine",
     overview:
@@ -57,27 +59,27 @@ export const algorithmContent: Record<AlgorithmKey, AlgorithmCopy> = {
     ],
   },
   ccd: {
-    number: "01",
+    number: "02",
     title: "CCD_IK",
     shortLabel: "cursor-following robot arm",
     overview:
       "Cyclic Coordinate Descent (CCD) reaches for a target one joint at a time. Starting at the hand, it turns each joint just enough to bring the hand closer, then repeats the sweep until the arm is close enough.",
     homeIntroTitle: "A robot arm that follows you",
     homeIntro:
-      "The robot demonstrates inverse kinematics in its most direct form: move the cursor and the end of the arm tries to follow. Instead of asking you to set six angles by hand, the solver continuously works backward from the desired hand position.",
+      "The robot demonstrates inverse kinematics in its most direct form: move the cursor and the tip of the arm tries to follow. CCD here only cares about where the hand is, not which way it is pointing. Full orientation control (aiming the tool, not just placing it) needs a Jacobian solver.",
     homeMethodTitle: "How CCD moves the arm",
     homeMethod:
-      "CCD checks the hand, the target, and one joint at a time. It measures the smallest turn that points the hand more toward the target, applies the joint's limits, updates the chain, and moves toward the base. Several short passes are more reliable than one large guess.",
+      "CCD checks the hand, the target, and one joint at a time. It measures the smallest turn that points the hand more toward the target, applies the joint's limits, updates the chain, and moves toward the base. Several short passes are more reliable than one large guess. Important: classic CCD does not solve for rotation of the end effector. It only chases a 3D position. Controlled orientation on every axis (roll, pitch, yaw of the hand) is a strength of Jacobian IK, which can take a full 6D target: where the tip should be and how it should face. Also, the idle lean when the arm is at rest is not CCD at all. It is a faked animation layer on top for presentation.",
     homeSteps: [
       "The cursor is projected onto a 3D surface in front of the robot.",
       "The solver starts with the joint closest to the hand.",
-      "Each joint turns toward the target without exceeding its safe range.",
-      "Eight quick passes refine the pose before the next frame.",
+      "Each joint turns to reduce position error only. Orientation is not a goal.",
+      "Eight quick passes refine the reach. Idle lean is layered on after solving.",
     ],
     homeStats: [
       { label: "Arm joints", value: "6" },
       { label: "Passes / frame", value: "8" },
-      { label: "Motion", value: "Per-joint smoothing" },
+      { label: "Target", value: "Position only" },
     ],
     detailSections: [
       {
@@ -93,7 +95,7 @@ export const algorithmContent: Record<AlgorithmKey, AlgorithmCopy> = {
       {
         label: "Realism and performance",
         text:
-          "The solved pose is kept separate from the visible pose and each joint eases toward it at its own speed. The base moves slowly while the hand follows faster, creating a small follow-through. The idle lean adds a restrained breathing-like motion when the robot is not being controlled. Temporary vectors are reused in the frame loop to avoid unnecessary allocations.",
+          "The solved pose is kept separate from the visible pose and each joint eases toward it at its own speed. The base moves slowly while the hand follows faster, creating a small follow-through. The idle lean is a separate animation layer on top of the solver: a restrained breathing-like sway when the robot is not being controlled. CCD itself only solves for the target position and does not produce idle motion or end-effector orientation goals. Temporary vectors are reused in the frame loop to avoid unnecessary allocations.",
       },
     ],
   },
@@ -102,23 +104,30 @@ export const algorithmContent: Record<AlgorithmKey, AlgorithmCopy> = {
     title: "JACOBIAN_IK",
     shortLabel: "whole-body spider movement",
     overview:
-      "The Jacobian solver looks at how every joint could move the foot right now. It combines those small suggestions and moves the whole leg together, which is useful for a spider that needs to keep several feet planted.",
-    homeIntroTitle: "A shared plan for every joint",
+      "The Jacobian solver looks at how every joint could move the foot right now. It combines those small suggestions and moves the whole leg together, which is useful for a spider that needs to keep several feet planted. Unlike classic CCD, Jacobian IK can also target a full end-effector pose: position plus orientation on every axis.",
+    homeIntroTitle: "Position, orientation, and every joint together",
     homeIntro:
-      "A Jacobian is a compact map of cause and effect: it describes how a small turn at each joint would move the foot. You do not need to read the matrix to see the idea — the spider uses it to choose a coordinated response instead of bending only one joint at a time.",
+      "A Jacobian is a compact map of cause and effect. It describes how a small turn at each joint would change the end effector. That map is not limited to where the tip sits in space. It can also include how the tip should face: roll, pitch, and yaw. Classic CCD usually only pulls toward a point. Jacobian IK is what lets you describe a true 6D goal (where the tip should be and which way it should point) and still treat joint limits as constraints. Here the spider uses that coordinated plan for each leg, instead of bending one joint at a time.",
     homeMethodTitle: "How the spider stays grounded",
     homeMethod:
-      "For each leg, the solver compares the current foot position with its ground target. It estimates the useful direction for every joint, combines those directions, and applies a small update to all joints. Damping makes the response stable when a leg is stretched into a difficult pose.",
+      "For each leg, the solver compares the current foot with its ground target. It estimates the useful direction for every joint, combines those directions, and applies a small update to all joints at once. The same machinery can carry orientation as well: the error vector can say both \"move the tip here\" and \"face this way,\" with joint angles as the free parameters and joint limits as constraints. In this demo the spider focuses on foot positions on the ground. Damping keeps the response stable when a leg is stretched into a difficult pose.",
+    homeTopics: [
+      {
+        title: "Open vs closed chain",
+        text:
+          "Jacobian IK can formulate closed-chain problems: loop constraints and parallel mechanisms such as a Stewart platform, where several actuators stay rigidly linked between a base and a moving plate. This spider is not closed-chain. Each leg is an independent open serial chain chasing a ground target, and in some postures a foot lifts off, so contact is a soft goal rather than a permanent rigid loop through the floor.",
+      },
+    ],
     homeSteps: [
       "Each leg keeps a target point on the ground.",
-      "The solver measures how each joint can help the foot move toward it.",
+      "The solver measures how every joint can help the foot (and, in a full pose setup, how it can help orientation).",
       "Damping prevents wild movements when the leg has few good options.",
       "Joint limits and smooth stepping keep the result believable.",
     ],
     homeStats: [
       { label: "Leg chains", value: "8" },
       { label: "Method", value: "Damped least squares" },
-      { label: "Joint cap", value: "45°" },
+      { label: "Capability", value: "Pose (pos + orient)" },
     ],
     detailSections: [
       {
