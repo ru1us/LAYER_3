@@ -9,7 +9,6 @@ export interface AlgorithmCopy {
   homeIntro: string;
   homeMethodTitle: string;
   homeMethod: string;
-  /** Optional extra topic blocks between method and steps */
   homeTopics?: { title: string; text: string }[];
   homeSteps: string[];
   homeStats: { label: string; value: string }[];

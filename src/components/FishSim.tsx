@@ -6,12 +6,11 @@ import { PauseButton, ControlsPanel, SliderRow, ToggleRow } from "./sim";
 import { useSettings } from "./SettingsContext";
 import { CanvasStatsReporter } from "./CanvasStats";
 
-// ── Simulation parameters (exported for external control) ─────────────────
 export interface SimParams {
-  maxBend: number;       // max bend angle per segment in radians
-  orbitRadius: number;   // target orbit radius in world units
-  forceStrength: number; // speed / force multiplier (1 = default)
-  followSpeed: number;   // bone slerp factor per frame (0–1)
+  maxBend: number;
+  orbitRadius: number;
+  forceStrength: number;
+  followSpeed: number;
 }
 export const DEFAULT_SIM_PARAMS: SimParams = {
   maxBend: Math.PI * (30 / 180),
@@ -20,9 +19,7 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   followSpeed: 0.4,
 };
 
-// ── FABRIK forward-only mit Winkelconstraint ──────────────────────────────
-// chain[0] = head (follows target), chain[N-1] = tail (drags behind)
-// maxBend = max Biegewinkel pro Segment in Radiant
+// Forward-only FABRIK: the head follows while the tail drags.
 function solveFABRIKForward(
   joints: THREE.Vector2[],
   segLengths: number[],
@@ -31,12 +28,10 @@ function solveFABRIKForward(
 ) {
   joints[0].copy(target);
   for (let i = 1; i < joints.length; i++) {
-    // Richtung von vorherigem zu diesem Joint
     let dir = joints[i].clone().sub(joints[i - 1]);
     if (dir.lengthSq() < 1e-10) dir.set(0, 1);
     dir.normalize();
 
-    // Winkelconstraint relativ zum vorigen Segment
     if (i >= 2) {
       const prevDir = joints[i - 1].clone().sub(joints[i - 2]).normalize();
       const cross = prevDir.x * dir.y - prevDir.y * dir.x; // 2D cross
@@ -55,7 +50,6 @@ function solveFABRIKForward(
   }
 }
 
-// ── Camera zoom updater (inside Canvas) ────────────────────────────────────
 function CameraZoom({ zoom }: { zoom: number }) {
   const { camera } = useThree();
   useEffect(() => {
@@ -65,7 +59,6 @@ function CameraZoom({ zoom }: { zoom: number }) {
   return null;
 }
 
-// ── Fish inner scene ───────────────────────────────────────────────────────
 function FishScene({
   ndcMouse,
   mouseInCanvas,
@@ -88,9 +81,24 @@ function FishScene({
     });
   }, [scene, shadowEnabled]);
 
+  useEffect(() => {
+    return () => {
+      // useGLTF caches the scene, so restore the shared rig before this
+      // deferred canvas unmounts. Otherwise the next mount starts mid-turn.
+      spineBones.current.forEach((bone, index) => {
+        const restPosition = restPositions.current[index];
+        const restQuat = restQuats.current[index];
+        if (restPosition) bone.position.copy(restPosition);
+        if (restQuat) bone.quaternion.copy(restQuat);
+      });
+      scene.updateMatrixWorld(true);
+    };
+  }, [scene]);
+
   const spineBones    = useRef<THREE.Bone[]>([]);
-  const restQuats     = useRef<THREE.Quaternion[]>([]); // lokale Rest-Quaternions
-  const restWorldQ    = useRef<THREE.Quaternion[]>([]); // Welt-Rest-Quaternions
+  const restQuats     = useRef<THREE.Quaternion[]>([]);
+  const restPositions  = useRef<THREE.Vector3[]>([]);
+  const restWorldQ    = useRef<THREE.Quaternion[]>([]);
   const bonesReady    = useRef(false);
 
   const SPINE   = 13; // Bone … Bone.012
@@ -98,21 +106,17 @@ function FishScene({
   const displayJoints = useRef<THREE.Vector2[]>(Array.from({ length: SPINE }, () => new THREE.Vector2())); // pre-alloc
   const segLens = useRef<number[]>(new Array(SPINE - 1).fill(1));
   const smoothTgt    = useRef(new THREE.Vector2(0, 0));
-  const fishPos      = useRef(new THREE.Vector2(0, 0)); // aktuelle Fischposition
-  const fishVel      = useRef(new THREE.Vector2(0, 0)); // Geschwindigkeitsvektor
-  const prevSpeed    = useRef(0);
-  const swimMomentum = useRef(0);
-  const wanderAngle  = useRef(0); // Kreisschwimmen wenn Cursor außerhalb
+  const fishPos      = useRef(new THREE.Vector2(0, 0));
+  const fishVel      = useRef(new THREE.Vector2(0, 0));
+  const wanderAngle  = useRef(0);
   const smoothVel     = useRef(new THREE.Vector2()); // EMA velocity for banking
   const prevSmoothVel = useRef(new THREE.Vector2());
   const targetRoll    = useRef(0); // heavily smoothed roll target
   const currentRoll   = useRef(0); // spring-smoothed roll applied to bones
-  // How long the cursor has been in the catch/hover zone near the EE
   const closeHoldTime = useRef(0);
-  // True after hold threshold met → keep pushing until cursor leaves zone
   const pushAwayActive = useRef(false);
 
-  // reusable objects – allocated once
+  // Reused raycasting objects.
   const _raycaster = useRef(new THREE.Raycaster());
   const _swimPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const _hit       = useRef(new THREE.Vector3());
@@ -139,8 +143,9 @@ function FishScene({
     if (chain.length < 2) return;
 
     spineBones.current = chain;
-    // Lokale + Welt-Rest-Quaternions speichern
+    // Save local and world rest rotations.
     restQuats.current  = chain.map(b => b.quaternion.clone());
+    restPositions.current = chain.map(b => b.position.clone());
     restWorldQ.current = chain.map(b => {
       const wq = new THREE.Quaternion();
       b.getWorldQuaternion(wq);
@@ -169,24 +174,22 @@ function FishScene({
     fishPos.current.copy(joints.current[0]);
     fishVel.current.set(0, 0.01);
     bonesReady.current = true;
-    console.log("[FishSim] ✓ ready – chain:", chain.length, "totalLen:", totalLen.toFixed(3));
   }
 
-  // End-Effector-Visualisierung
   const effectorRef = useRef<THREE.Mesh>(null!);
 
   useFrame((_state, delta) => {
     if (!bonesReady.current) { initBones(); return; }
 
-    // ── Steering Behavior (Nature of Code) ───────────────────────────────
+    // Steering behavior.
     _raycaster.current.setFromCamera(ndcMouse.current, camera);
     const hit = _raycaster.current.ray.intersectPlane(_swimPlane.current, _hit.current);
 
     if (mouseInCanvas.current) {
-      // Cursor im Canvas → normales Tracking
+      // Track the pointer inside the canvas.
       if (hit) smoothTgt.current.set(hit.x, hit.z);
     } else {
-      // Cursor außerhalb → Kreis um aktuelle Fischposition
+      // Orbit when the pointer leaves.
       wanderAngle.current += 0.012;
       const WANDER_R = 2.2;
       smoothTgt.current.set(
@@ -240,11 +243,11 @@ function FishScene({
       if (steer.length() > pushMaxForce) steer.normalize().multiplyScalar(pushMaxForce);
       fishVel.current.add(steer);
     } else if (dist > 0.001) {
-      // Seek: je weiter weg, desto stärker anziehen
+      // Increase attraction with distance.
       const seekStrength = Math.min(dist / 8, 1);
       const desired = toTarget.clone().normalize().multiplyScalar(MAX_SPEED * seekStrength);
 
-      // Orbit: senkrechte Kraft – Seite anhand aktueller Velocity wählen
+      // Choose orbit direction from velocity.
       const cross2d = toTarget.x * fishVel.current.y - toTarget.y * fishVel.current.x;
       const perpSign = cross2d >= 0 ? 1 : -1;
       const perp = new THREE.Vector2(-toTarget.y * perpSign, toTarget.x * perpSign).normalize();
@@ -258,7 +261,7 @@ function FishScene({
         Math.max(0, 1 - Math.abs(dist - ORBIT_R) / (ORBIT_R * 2)) * closeBlend;
       const steerTarget = desired.clone().lerp(orbitForce, orbitWeight);
 
-      // Steering = gewünschte Geschwindigkeit - aktuelle
+      // Steering is desired minus current velocity.
       const steer = steerTarget.clone().sub(fishVel.current);
       if (steer.length() > MAX_FORCE) steer.normalize().multiplyScalar(MAX_FORCE);
 
@@ -274,7 +277,7 @@ function FishScene({
       fishVel.current.multiplyScalar(0.72 + 0.28 * closeBlend);
     }
 
-    // Geschwindigkeit begrenzen (higher cap during push so flee is visible)
+    // Raise the speed cap while fleeing.
     const speedCap = pushAwayActive.current
       ? 0.09 * params.current.forceStrength
       : MAX_SPEED;
@@ -284,15 +287,9 @@ function FishScene({
 
     fishPos.current.add(fishVel.current);
 
-    // Momentum aus aktueller Geschwindigkeit
     const speed = fishVel.current.length();
-    prevSpeed.current = speed;
-    swimMomentum.current = Math.min(speed / Math.max(MAX_SPEED, 1e-6), 1);
 
-    // ── Banking-Roll: smooth lean into corners (no frame-jitter wiggle) ──────
-    // Raw frame-to-frame yaw is noisy (steering micro-corrections). Pipeline:
-    //   1) EMA fish velocity  →  2) signed turn rate  →  3) heavy target EMA
-    //   →  4) slow spring to currentRoll. Same roll on every bone (no twist).
+    // Smooth turn rate before applying a uniform banking roll.
     const MAX_ROLL = Math.PI * 0.28; // ~50°
     if (speed > 0.0015) {
       // Soft-follow raw velocity so steering noise is filtered before angle math
@@ -327,15 +324,15 @@ function FishScene({
 
     const fabrikTarget = fishPos.current.clone();
 
-    // ── FABRIK auf persistenten joints (KEIN Wave-Offset hier!) ───────────
+    // Solve persistent joints without a wave offset.
     solveFABRIKForward(joints.current, segLens.current, fabrikTarget, params.current.maxBend);
 
-    // displayJoints = direkte Kopie (keine Welle, pre-allocated)
+    // Copy into the preallocated display chain.
     for (let i = 0; i < joints.current.length; i++) {
       displayJoints.current[i].copy(joints.current[i]);
     }
 
-    // ── Root-Bone zu Kopfposition bewegen ─────────────────────────────────
+    // Move the root bone to the head.
     const bones = spineBones.current;
     const rootParent = bones[0]?.parent;
     if (rootParent) {
@@ -348,7 +345,7 @@ function FishScene({
       bones[0].position.set(localTarget.x, bones[0].position.y, localTarget.z);
     }
 
-    // ── Rotationen anwenden (aus displayJoints) ───────────────────────────
+    // Apply display-chain rotations.
     let parentWorldQ = new THREE.Quaternion();
     if (rootParent) rootParent.getWorldQuaternion(parentWorldQ);
 
@@ -357,18 +354,19 @@ function FishScene({
       const dz = displayJoints.current[i + 1].y - displayJoints.current[i].y;
       if (Math.abs(dx) < 1e-8 && Math.abs(dz) < 1e-8) continue;
 
-      // Rest-Forward-Richtung dieses Knochens in der Welt (XZ-Projektion)
+      // Project the bone's rest direction onto XZ.
       const localFwd = new THREE.Vector3(0, 1, 0);
       localFwd.applyQuaternion(restWorldQ.current[i]);
       const restYaw = Math.atan2(localFwd.x, localFwd.z);
 
-      // Gewünschter Welt-Yaw aus FABRIK
+      // Get the desired world yaw.
       const desiredYaw = Math.atan2(dx, dz);
 
-      // Delta: wie viel muss sich der Knochen gegenüber seiner Ruhepose drehen
-      const deltaYaw = desiredYaw - restYaw;
+      // Normalize the rest-pose delta across ±π.
+      const rawDeltaYaw = desiredYaw - restYaw;
+      const deltaYaw = Math.atan2(Math.sin(rawDeltaYaw), Math.cos(rawDeltaYaw));
 
-      // Welt-Zielquaternion = Rest-Weltpose + Delta um Welt-Y
+      // Rotate the world rest pose by the yaw delta.
       const qDelta = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), deltaYaw);
       let qDesiredWorld = qDelta.clone().multiply(restWorldQ.current[i]);
 
@@ -380,14 +378,14 @@ function FishScene({
         qDesiredWorld = rollQ.multiply(qDesiredWorld);
       }
 
-      // In lokalen Raum umrechnen
+      // Convert to local space.
       const qLocal   = parentWorldQ.clone().invert().multiply(qDesiredWorld);
       const qClamped = bones[i].quaternion.clone().slerp(qLocal, params.current.followSpeed);
       bones[i].quaternion.copy(qClamped);
       parentWorldQ = parentWorldQ.clone().multiply(qClamped);
     }
 
-    // ── End-Effector aktualisieren ─────────────────────────────────────────
+    // Update the end effector.
     if (effectorRef.current) {
       effectorRef.current.position.set(fabrikTarget.x, 0.5, fabrikTarget.y);
     }
@@ -402,7 +400,6 @@ function FishScene({
           <shadowMaterial transparent opacity={0.42} />
         </mesh>
       )}
-      {/* End-Effector */}
       {showEffector && (
         <mesh ref={effectorRef}>
           <sphereGeometry args={[0.1, 10, 10]} />
@@ -413,7 +410,6 @@ function FishScene({
   );
 }
 
-// ── Public component ───────────────────────────────────────────────────────
 export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObject<SimParams> }) {
   const { profile } = useSettings();
   const internalParamsRef = useRef<SimParams>(DEFAULT_SIM_PARAMS);
@@ -495,7 +491,6 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           bgParallaxTarget.current.set(0, 0);
         }}
       >
-      {/* SVG-Wasserfilter Definition */}
       <svg style={{ position: "absolute", width: 0, height: 0 }}>
         <defs>
           <filter id="water-distort" x="0%" y="0%" width="100%" height="100%" colorInterpolationFilters="sRGB">
@@ -524,10 +519,8 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
         </defs>
       </svg>
 
-      {/* Pause button */}
       <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
 
-      {/* Controls toggle + panel (overlay) */}
       <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
         <div className="grid md:grid-cols-2 gap-4">
           <SliderRow
@@ -566,7 +559,6 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
       </ControlsPanel>
 
       <div style={profile.high ? { filter: "url(#water-distort)" } : undefined} className="relative z-10 w-full h-full">
-          {/* Background title with subtle parallax */}
           <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
             <div className="absolute inset-0 flex items-center justify-center px-8">
               <div ref={bgTitleRef} className="text-center opacity-70 will-change-transform">
@@ -578,7 +570,6 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
             </div>
           </div>
 
-          {/* Grid background – innerhalb des Wasserfilters */}
           <div
             ref={bgGridRef}
             className="absolute inset-0 z-[5] pointer-events-none will-change-transform"
@@ -594,7 +585,7 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           frameloop={paused ? "never" : "always"}
           dpr={profile.dpr}
           orthographic
-          shadows={shadowsOn}
+          shadows={shadowsOn ? "percentage" : false}
           camera={{ position: [0, 200, 0], zoom: 120, near: 1, far: 1000 }}
           gl={{ antialias: profile.antialias, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
           className="relative z-10 w-full h-full"

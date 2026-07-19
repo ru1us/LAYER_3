@@ -1,8 +1,4 @@
-/**
- * PauseButton – reusable sim pause/resume toggle.
- *
- * Light-themed to match the site navbar. Placed bottom-right of the sim section.
- */
+/** Simulation pause/resume toggle. */
 export function PauseButton({
   paused,
   onToggle,

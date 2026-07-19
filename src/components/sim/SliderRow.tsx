@@ -1,9 +1,4 @@
-/**
- * SliderRow – reusable labeled range input for sim controls.
- *
- * Pairs a label + live value readout with a styled range input.
- * Light-themed to sit inside ControlsPanel; uses the accent thumb (.sim-range).
- */
+/** Labeled simulation range input. */
 export function SliderRow({
   label,
   value,

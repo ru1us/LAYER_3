@@ -8,17 +8,15 @@ import { CanvasStatsReporter } from "./CanvasStats";
 
 const COLOR_BG = "#F5F5F5";
 
-// ── Constants ──────────────────────────────────────────────────────────────
-// Ball count is quality-dependent: the ball–ball collision pass is O(n²), so
-// performance mode drops this dramatically.
+// Performance mode limits the O(n²) collision pass.
 const BALL_COUNT_HIGH = 200;
 const BALL_COUNT_PERF = 70;
-const BALL_RADIUS = 30;           // physics collision radius (world units)
-const BALL_SCALE  = BALL_RADIUS;  // render scale – assumes GLB native radius ≈ 1
+const BALL_RADIUS = 30;
+const BALL_SCALE  = BALL_RADIUS;
 const DIAMETER   = BALL_RADIUS * 2;
 const REPULSION_RADIUS   = 180;
 const REPULSION_STRENGTH = 4.0;
-const MAX_MOUSE_SPEED    = 3;   // px/ms — above this repulsion is at full strength
+const MAX_MOUSE_SPEED    = 3;
 const DAMPING     = 0.988;
 const GRAVITY     = 0.3;
 const BOUNDS_X    = 1050;  
@@ -39,7 +37,6 @@ const DEFAULT_PARTICLE_PARAMS: ParticleParams = {
   repulsionStrength: REPULSION_STRENGTH,
 };
 
-// ── Per-ball state (full 3-D) ──────────────────────────────────────────────
 interface Ball {
   x: number; y: number; z: number;
   vx: number; vy: number; vz: number;
@@ -47,7 +44,6 @@ interface Ball {
   spawnAt: number; // performance.now() timestamp — ball is frozen until this
 }
 
-// ── Inner scene ───────────────────────────────────────────────────────────
 function Particles({ count, high, params }: {
   count: number;
   high: boolean;
@@ -56,8 +52,7 @@ function Particles({ count, high, params }: {
   const { camera, gl } = useThree();
   const { scene: ballScene } = useGLTF("/ball.glb");
 
-  // Extract geometry + original GLB material properties, then build a
-  // MeshPhysicalMaterial on top so we can add sheen without losing the original look.
+  // Preserve the GLB look while adding sheen.
   const { geom, mat } = useMemo(() => {
     let geom: THREE.BufferGeometry | null = null;
     let srcMat: THREE.MeshStandardMaterial | null = null;
@@ -72,9 +67,7 @@ function Particles({ count, high, params }: {
     // Cast needed: TS loses the narrowed type after the traverse callback
     const src = srcMat as THREE.MeshStandardMaterial | null;
 
-    // Performance mode uses a plain MeshStandardMaterial with no textures
-    // (flat color only); high quality inherits the GLB maps and adds a
-    // felt-like sheen on top via MeshPhysicalMaterial (an expensive shader).
+    // High quality keeps maps and adds a physical-material sheen.
     const base = {
       map:          high ? (src?.map          ?? null) : null,
       color:        src?.color        ?? new THREE.Color("#ffffff"),
@@ -100,13 +93,13 @@ function Particles({ count, high, params }: {
   const balls     = useRef<Ball[]>([]);
   const mouseNDC  = useRef(new THREE.Vector2(99999, 99999));
 
-  // Reusable scratch objects — no per-frame allocation
+  // Reused per-frame objects.
   const dummy      = useRef(new THREE.Object3D());
   const _raycaster = useRef(new THREE.Raycaster());
   const _closest   = useRef(new THREE.Vector3());
   const _ballPos   = useRef(new THREE.Vector3());
 
-  // Initialise balls above the ceiling with a staggered spawn delay
+  // Stagger spawns above the ceiling.
   useEffect(() => {
     const now = performance.now();
     balls.current = Array.from({ length: count }, (_, i) => ({
@@ -121,7 +114,7 @@ function Particles({ count, high, params }: {
     }));
   }, [count]);
 
-  // Track mouse NDC + speed (px/ms, EMA-smoothed)
+  // Track smoothed pointer speed.
   const mouseMovedAt  = useRef(0);
   const mouseSpeed    = useRef(0);          // smoothed speed in px/ms
   const _prevMousePx  = useRef({ x: 0, y: 0, t: 0 });
@@ -161,10 +154,10 @@ function Particles({ count, high, params }: {
     if (!meshRef.current || balls.current.length === 0) return;
     const now = performance.now();
 
-    // Build mouse ray — works correctly for both perspective and orthographic cameras
+    // Build the pointer ray.
     _raycaster.current.setFromCamera(mouseNDC.current, camera);
     const _ray = _raycaster.current.ray;
-    // Scale repulsion by mouse speed — fades to zero when mouse is still
+    // Fade repulsion when the pointer stops.
     const age         = performance.now() - mouseMovedAt.current;
     const speedFactor = age < 150
       ? Math.min(mouseSpeed.current / MAX_MOUSE_SPEED, 1)
@@ -173,15 +166,14 @@ function Particles({ count, high, params }: {
     const bs = balls.current;
     const n  = bs.length;
 
-    // ── Per-ball: gravity + mouse repulsion + integrate ──────────────────
+    // Update each ball.
     for (let i = 0; i < n; i++) {
       const b = bs[i];
       if (now < b.spawnAt) continue; // not yet released
 
-      // Gravity
       b.vy -= params.current.gravity;
 
-      // 3-D mouse repulsion scaled by how fast the mouse is moving
+      // Pointer-speed-scaled repulsion.
       if (speedFactor > 0.01) {
         _ballPos.current.set(b.x, b.y, b.z);
         _ray.closestPointToPoint(_ballPos.current, _closest.current);
@@ -197,7 +189,6 @@ function Particles({ count, high, params }: {
         }
       }
 
-      // Damping & integrate
       b.vx *= DAMPING;
       b.vy *= DAMPING;
       b.vz *= DAMPING;
@@ -205,7 +196,6 @@ function Particles({ count, high, params }: {
       b.y  += b.vy;
       b.z  += b.vz;
 
-      // Wall bounces
       if (b.x >  BOUNDS_X) { b.x =  BOUNDS_X; b.vx *= -RESTITUTION; }
       if (b.x < -BOUNDS_X) { b.x = -BOUNDS_X; b.vx *= -RESTITUTION; }
       if (b.z >  BOUNDS_Z) { b.z =  BOUNDS_Z; b.vz *= -RESTITUTION; }
@@ -214,7 +204,7 @@ function Particles({ count, high, params }: {
       if (b.y > CEIL_Y)                { b.y = CEIL_Y;                 b.vy *= -RESTITUTION; }
     }
 
-    // ── Ball–ball 3-D collision pass ─────────────────────────────────────
+    // Resolve ball collisions.
     for (let i = 0; i < n - 1; i++) {
       const a = bs[i];
       if (now < a.spawnAt) continue;
@@ -232,12 +222,10 @@ function Particles({ count, high, params }: {
         const ny = dy / dist;
         const nz = dz / dist;
 
-        // Separate
         const overlap = (DIAMETER - dist) * 0.5;
         a.x -= nx * overlap; a.y -= ny * overlap; a.z -= nz * overlap;
         b.x += nx * overlap; b.y += ny * overlap; b.z += nz * overlap;
 
-        // Impulse
         const dvn = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny + (a.vz - b.vz) * nz;
         if (dvn > 0) {
           const impulse = dvn * (1 + RESTITUTION) * 0.5;
@@ -247,7 +235,7 @@ function Particles({ count, high, params }: {
       }
     }
 
-    // ── Upload matrices ──────────────────────────────────────────────────
+    // Update instance matrices.
     for (let i = 0; i < n; i++) {
       const b = bs[i];      // Hide balls that haven't spawned yet (scale to 0)
       if (now < b.spawnAt) {
@@ -277,7 +265,6 @@ function Particles({ count, high, params }: {
 }
 
 
-// ── Public component ───────────────────────────────────────────────────────
 export default function ParticleSim() {
   const { profile } = useSettings();
   const sectionRef   = useRef<HTMLElement>(null);
@@ -291,7 +278,7 @@ export default function ParticleSim() {
 
   const ballCount = profile.high ? BALL_COUNT_HIGH : BALL_COUNT_PERF;
 
-  // ── Custom cursor dot ────────────────────────────────────────────────────
+  // Custom pointer.
   const dotRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -315,7 +302,7 @@ export default function ParticleSim() {
     return () => { section.removeEventListener('mousemove', onMove); section.removeEventListener('mouseleave', onLeave); clearTimeout(timer); };
   }, []);
 
-  // Mount (and start) the sim when the section scrolls close to the viewport
+  // Start near the viewport.
   useEffect(() => {
     if (loaded) return;
     const check = () => {
@@ -335,14 +322,12 @@ export default function ParticleSim() {
       ref={sectionRef}
       className="relative z-10 bg-surface border-t border-border h-[640px] cursor-none"
     >
-      {/* Custom cursor dot */}
       <div
         ref={dotRef}
         className="absolute hidden size-5 rounded-full bg-[#111111] pointer-events-none z-30 transition-[width,height] duration-150 ease-in-out"
         style={{ transform: 'translate(-50%, -50%)' }}
       />
 
-      {/* Label overlay */}
       <div className="absolute top-8 left-12 z-10 pointer-events-none">
         <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-[#999999] mb-2">
           Interactive
@@ -414,7 +399,6 @@ export default function ParticleSim() {
         </div>
       </ControlsPanel>
 
-      {/* Pause button */}
       <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
     </section>
   );

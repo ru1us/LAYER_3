@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** Shared section chrome used on About (and formerly detail pages). */
+/** Shared About page section. */
 export function AlgorithmSection({
   number,
   label,

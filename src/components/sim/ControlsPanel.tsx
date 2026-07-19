@@ -1,14 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 
-/**
- * ControlsPanel – reusable shell for sim parameter panels.
- *
- * Renders a centered bottom overlay with a toggle button and a collapsible
- * panel body. The panel body is a slot (`children`) so each sim provides its
- * own sliders/inputs.
- *
- * Light-themed to match the site navbar / settings panel.
- */
+/** Collapsible simulation controls. */
 export function ControlsPanel({
   open,
   onToggle,
@@ -25,7 +17,7 @@ export function ControlsPanel({
   children: ReactNode;
 }) {
   return (
-    <div className="absolute bottom-6 left-1/2 z-30 flex w-[min(92vw,680px)] -translate-x-1/2 flex-col items-center">
+    <div className="absolute bottom-6 left-1/2 z-30 flex w-[min(92vw,680px)] -translate-x-1/2 cursor-auto flex-col items-center">
       {open && (
         <div
           className={`mb-3 w-full rounded-[10px] border border-text bg-surface-raised p-6 max-h-[42vh] overflow-y-auto ${panelClassName}`}

@@ -1,8 +1,15 @@
+import CanvasText, { rev } from "../components/CanvasText";
+
 const H2 = "m-0 mb-4 font-doto text-[clamp(1.4rem,2.5vw,2rem)] font-black uppercase tracking-[-0.03em]";
 const H3 = "m-0 mb-3 mt-6 font-doto text-[1.05rem] font-black uppercase tracking-[-0.02em]";
 const P = "m-0 mb-4 max-w-3xl text-[0.84rem] leading-[1.85] text-text-muted";
 const UL = "mb-4 list-disc space-y-1 pl-6 text-[0.84rem] leading-[1.85] text-text-muted";
 const LINK = "font-bold text-text underline decoration-accent decoration-2 underline-offset-2 transition-colors hover:text-text-muted";
+
+// Reversed mailto deters HTML-scraping bots.
+const EMAIL_HREF = rev("mailto:plagarufus@gmail.com");
+const EMAIL_LINES = [{ text: "plagarufus@gmail.com", reversedHref: EMAIL_HREF }];
+const EMAIL_PREFIXED_LINES = [{ text: "Email: plagarufus@gmail.com", reversedHref: EMAIL_HREF }];
 
 export default function PrivacyPage() {
   return (
@@ -26,7 +33,7 @@ export default function PrivacyPage() {
               <p className={P}>
                 The data controller for this website is:<br />
                 Rufus Plaga<br />
-                Email: <a href="mailto:plagarufus@gmail.com" className={LINK}>plagarufus@gmail.com</a>
+                <CanvasText inline lines={EMAIL_PREFIXED_LINES} className="font-mono" />
               </p>
             </section>
 
@@ -96,7 +103,7 @@ export default function PrivacyPage() {
               <h2 className={H2}>4. Contact via Email</h2>
               <p className={P}>
                 If you contact us via email at{" "}
-                <a href="mailto:plagarufus@gmail.com" className={LINK}>plagarufus@gmail.com</a>
+                <CanvasText inline lines={EMAIL_LINES} className="font-mono" />
                 , your email content (email address, name, message) will only be used to respond to your inquiry.
               </p>
               <p className={P}>
@@ -132,7 +139,7 @@ export default function PrivacyPage() {
               </p>
               <p className={P}>
                 For questions or to exercise your rights, contact:{" "}
-                <a href="mailto:plagarufus@gmail.com" className={LINK}>plagarufus@gmail.com</a>
+                <CanvasText inline lines={EMAIL_LINES} className="font-mono" />
               </p>
             </section>
 

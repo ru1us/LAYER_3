@@ -1,6 +1,21 @@
+import CanvasText, { rev } from "../components/CanvasText";
+
 const H2 = "m-0 mb-4 font-doto text-[clamp(1.4rem,2.5vw,2rem)] font-black uppercase tracking-[-0.03em]";
 const P = "m-0 mb-4 max-w-3xl text-[0.84rem] leading-[1.85] text-text-muted";
-const LINK = "font-bold text-text underline decoration-accent decoration-2 underline-offset-2 transition-colors hover:text-text-muted";
+
+// Reversed hrefs deter HTML-scraping bots.
+const EMAIL_HREF = rev("mailto:plagarufus@gmail.com");
+const PHONE_HREF = rev("tel:+4915204770398");
+
+const CONTACT_LINES = [
+  { text: "Rufus Plaga", bold: true },
+  { text: "Im Fischergarten 1" },
+  { text: "88250 Weingarten" },
+  { text: "Germany" },
+  { text: "" },
+  { text: "Email: plagarufus@gmail.com", reversedHref: EMAIL_HREF },
+  { text: "Phone: +49 1520 4770398", reversedHref: PHONE_HREF },
+];
 
 export default function ImprintPage() {
   return (
@@ -22,19 +37,8 @@ export default function ImprintPage() {
             <section className="border-t border-border pt-8">
               <h2 className={H2}>Contact Information</h2>
               <div className="border border-text bg-text p-px">
-                <div className="bg-bg p-6 font-mono text-[0.84rem] leading-[1.85] text-text-muted">
-                  <p className="m-0 mb-1 font-bold text-text">Rufus Plaga</p>
-                  <p className="m-0">Im Fischergarten 1</p>
-                  <p className="m-0">88250 Weingarten</p>
-                  <p className="m-0 mb-4">Germany</p>
-                  <p className="m-0 mb-1">
-                    <span className="font-bold text-text">Email:</span>{" "}
-                    <a href="mailto:plagarufus@gmail.com" className={LINK}>plagarufus@gmail.com</a>
-                  </p>
-                  <p className="m-0">
-                    <span className="font-bold text-text">Phone:</span>{" "}
-                    <a href="tel:+4915204770398" className={LINK}>+49 1520 4770398</a>
-                  </p>
+                <div className="bg-bg p-6">
+                  <CanvasText lines={CONTACT_LINES} className="font-mono text-text-muted" />
                 </div>
               </div>
             </section>

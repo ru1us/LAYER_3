@@ -1,26 +1,4 @@
-/**
- * SpiderSim – Jacobian Damped-Least-Squares IK for the spider.glb rig.
- *
- * Bone hierarchy (Three.js dot-stripped names):
- *   Head            – body / head, tracks cursor (Y-yaw + X-pitch, ±45°)
- *   L1 / L2 / L3 / L4 / R1 / R2 / R3 / R4  – leg roots, no rotation
- *   L1001 … L1005   – active chain; .001 → Z-axis, .002–.005 → X-axis
- *   (same suffix pattern for all 8 legs)
- *
- * Algorithm:
- *   Each frame:
- *     1. Rotate Head to track cursor (smooth lerp, clamped ±45°).
- *     2. For each leg, run N iterations of Jacobian DLS IK to pull the foot
- *        back to its fixed world-space ground target.
- *
- *   Jacobian column for joint i:
- *     J_i = axis_i_world × (EE_world − joint_i_world)
- *
- *   DLS solution:
- *     Δθ = Jᵀ (J Jᵀ + λ²I)⁻¹ Δx
- *
- * Rotations are clamped per joint to the rig's measured bend ranges.
- */
+/** Jacobian DLS IK with measured joint limits for the spider rig. */
 
 import { useGLTF, Environment } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
@@ -30,7 +8,6 @@ import { CanvasStatsReporter } from "./CanvasStats";
 import { ControlsPanel, SliderRow } from "./sim";
 import * as THREE from "three";
 
-// ── Constants ────────────────────────────────────────────────────────────────
 const CLAMP_RAD     = Math.PI / 4;          // 45° hard cap on every joint
 const IK_ITER       = 20;                   // Jacobian iterations per leg per frame
 const DLS_LAMBDA    = 0.03;                 // damping factor
@@ -44,13 +21,12 @@ const MAX_FOOT_LIFT = 0.45;
 const IK_FAIL_DISTANCE = 0.12;
 const FOOT_LIFT_GAIN = 0.75;
 const MAX_JOINT_UPDATE = 0.12;
-/** Default bend scale = 100% of the rig's measured joint ranges. */
 const DEFAULT_MAX_BEND = 1.0;
 
 interface SpiderParams {
   headSmooth: number;
   bodyLean: number;
-  /** Multiplier on per-joint rotation clamps (0.4 = stiff, 1.5 = very flexible). */
+  /** Per-joint limit multiplier. */
   maxBend: number;
 }
 
@@ -62,7 +38,7 @@ const DEFAULT_SPIDER_PARAMS: SpiderParams = {
 
 const LEG_NAMES = ["L1", "L2", "L3", "L4", "R1", "R2", "R3", "R4"] as const;
 
-// ── Module-level scratch space (zero per-frame heap alloc) ──────────────────
+// Reused per-frame scratch space.
 const _wq   = new THREE.Quaternion();
 const _axL  = new THREE.Vector3();   // local rotation axis
 const _axW  = new THREE.Vector3();   // world-space rotation axis
@@ -72,14 +48,13 @@ const _r    = new THREE.Vector3();   // ee − joint
 const _err  = new THREE.Vector3();   // target − ee
 const _col  = new THREE.Vector3();   // Jacobian column (axisW × r)
 
-// Jacobian stored as n×3 row-major Float64Array: row = joint, cols = [vx,vy,vz]
+// Row-major Jacobian: one [vx, vy, vz] row per joint.
 const _jBuf = new Float64Array(5 * 3);   // max 5 joints
 const _JJT  = new Float64Array(9);       // JJᵀ + λ²I, 3×3 row-major
 const _rhs  = new Float64Array(3);       // position error Δx
 const _v3   = new Float64Array(3);       // (JJᵀ + λ²I)⁻¹ Δx
 
-// ── 3×3 Cramer solve: (_JJT) · _v3 = _rhs  ─────────────────────────────────
-// Reads _JJT and _rhs, writes _v3. Returns false if singular.
+// Solve _JJT · _v3 = _rhs by Cramer's rule.
 function solveDLS3(): boolean {
   const a = _JJT[0], b = _JJT[1], c = _JJT[2];
   const d = _JJT[3], e = _JJT[4], f = _JJT[5];
@@ -94,11 +69,10 @@ function solveDLS3(): boolean {
   return true;
 }
 
-// ── Per-leg data ─────────────────────────────────────────────────────────────
 interface LegData {
   joints: THREE.Object3D[];
   isRoot: boolean[];   // true = first/root joint (Z axis), false = bend joint (X axis)
-  /** Per-joint [min, max] in radians */
+  /** Radian limits per joint. */
   clamp: [number, number][];
   target: THREE.Vector3;
   groundTarget: THREE.Vector3;
@@ -131,7 +105,7 @@ function getLowestWorldPoint(root: THREE.Object3D): THREE.Vector3 {
   return best;
 }
 
-// ── Jacobian DLS solver for one leg ──────────────────────────────────────────
+// Jacobian DLS solver for one leg.
 function jointLimits(base: [number, number], maxBend: number): [number, number] {
   return [base[0] * maxBend, base[1] * maxBend];
 }
@@ -149,7 +123,7 @@ function solveOneLeg(leg: LegData, maxBend: number): void {
     _err.subVectors(target, _ee);
     if (_err.lengthSq() < 1e-7) break;
 
-    // ── Build Jacobian rows (n × 3, row = joint, cols = [vx,vy,vz]) ─────
+    // Build Jacobian rows.
     for (let i = 0; i < n; i++) {
       joints[i].getWorldQuaternion(_wq);
       _axL.set(isRoot[i] ? 0 : 1, 0, isRoot[i] ? 1 : 0);  // root joint → local Z, others → local X
@@ -162,7 +136,7 @@ function solveOneLeg(leg: LegData, maxBend: number): void {
       _jBuf[i * 3 + 2] = _col.z;
     }
 
-    // ── JJᵀ + λ²I (3 × 3) ────────────────────────────────────────────────
+    // Compute JJᵀ + λ²I.
     for (let row = 0; row < 3; row++) {
       for (let col2 = 0; col2 < 3; col2++) {
         let s = 0;
@@ -174,13 +148,13 @@ function solveOneLeg(leg: LegData, maxBend: number): void {
     _JJT[4] += DLS_LAMBDA_SQ;
     _JJT[8] += DLS_LAMBDA_SQ;
 
-    // ── Solve (JJᵀ + λ²I) v = Δx → _v3 ──────────────────────────────────
+    // Solve for v.
     _rhs[0] = _err.x;
     _rhs[1] = _err.y;
     _rhs[2] = _err.z;
     if (!solveDLS3()) continue;
 
-    // ── Δθᵢ = Jᵀᵢ · v, apply + asymmetric clamp ─────────────────────────
+    // Apply clamped joint updates.
     for (let i = 0; i < n; i++) {
       const dTheta = _jBuf[i * 3 + 0] * _v3[0]
                    + _jBuf[i * 3 + 1] * _v3[1]
@@ -207,13 +181,13 @@ function solveOneLeg(leg: LegData, maxBend: number): void {
     break;
   }
 
-  // ── Floor clamp: lift foot back to groundY if IK left it below ────────
+  // Lift feet back to the floor.
   for (let clamped = 0; clamped < 6; clamped++) {
     joints[n - 1].localToWorld(_ee.copy(endLocal));
     const dy = leg.groundY - _ee.y;
     if (dy < 0.002) break;
 
-    // Build Y-only Jacobian (1-DOF: all joints vs. Y error)
+    // Build a Y-only Jacobian.
     for (let i = 0; i < n; i++) {
       joints[i].getWorldQuaternion(_wq);
       _axL.set(isRoot[i] ? 0 : 1, 0, isRoot[i] ? 1 : 0);
@@ -241,7 +215,6 @@ function solveOneLeg(leg: LegData, maxBend: number): void {
   }
 }
 
-// ── Model-only inner component (suspends while GLTF loads) ───────────────────
 function SpiderModel({
   mouseNDC,
   params,
@@ -254,10 +227,9 @@ function SpiderModel({
   const gltf = useGLTF("/spider3.glb");
   const gl = useThree((s) => s.gl);
 
-  // Soften matte materials so the studio HDRI actually shows up in reflections.
-  // NonColor maps on roughness/metalness are correct — they are not the issue.
+  // Soften matte materials for visible HDRI reflections.
   useEffect(() => {
-    // Strip lights baked into the GLB (we use our own lighting setup)
+    // Remove baked lights.
     const glbLights: THREE.Object3D[] = [];
     gltf.scene.traverse((obj) => {
       if ((obj as THREE.Light).isLight) glbLights.push(obj);
@@ -282,8 +254,7 @@ function SpiderModel({
     });
   }, [gltf.scene, high]);
 
-  // Measure floor height from the GLB ground, but keep it invisible —
-  // the scene uses the flat gray background + grid instead.
+  // Measure the hidden GLB ground.
   const staticGround = useMemo(() => {
     const source = gltf.scene.getObjectByName("ground") ?? null;
     if (!source) return null;
@@ -312,29 +283,20 @@ function SpiderModel({
   const idleTime    = useRef(0);
   const idleBlend   = useRef(0);
 
-  // ── First-frame init (world matrices are valid inside useFrame) ────────
+  // Initialize after world matrices are ready.
   useFrame(() => {
     if (initDone.current) return;
     initDone.current = true;
 
     gltf.scene.updateWorldMatrix(true, true);
 
-    // Bounding box — tells us scale + position
-    const box  = new THREE.Box3().setFromObject(gltf.scene);
-    const ctr  = new THREE.Vector3();
-    const sz   = new THREE.Vector3();
-    box.getCenter(ctr);
-    box.getSize(sz);
-    console.log("[Spider] bbox center:", ctr.toArray().map(v => v.toFixed(3)), "size:", sz.toArray().map(v => v.toFixed(3)));
-
     // Name → node map
     const nm = new Map<string, THREE.Object3D>();
     gltf.scene.traverse((o) => { if (o.name) nm.set(o.name, o); });
-    console.log("[Spider] nodes:", [...nm.keys()].sort().join(", "));
 
     // Head bone
     headRef.current = nm.get("Head") ?? nm.get("head") ?? null;
-    if (!headRef.current) console.warn("[Spider] 'Head' not found");
+    if (!headRef.current) console.error("[Spider] 'Head' not found");
 
     // Leg chains
     const legs: LegData[] = [];
@@ -365,8 +327,6 @@ function SpiderModel({
           [-40*D,      0],   // joint 4 – X
         ];
         clamp.push(perJoint[joints.length - 1] ?? [-CLAMP_RAD, CLAMP_RAD]);
-        const axisLabel = useRoot ? 'z' : 'x';
-        console.log(`[Spider] ${root}.${padded} axis=${axisLabel} clamp=[${clamp[clamp.length-1].map(v=>v.toFixed(2))}]`);
       }
 
       if (joints.length === 0) continue;
@@ -381,19 +341,13 @@ function SpiderModel({
       });
     }
 
-    // ── Measure feet from the GLB's loaded pose (don't reset rotations!) ─
-    // Log bone rotations to confirm the pose came through
-    for (const leg of legs) {
-      const j0 = leg.joints[0];
-      console.log(`[Spider] ${j0.name} loaded rot: x=${j0.rotation.x.toFixed(3)} y=${j0.rotation.y.toFixed(3)} z=${j0.rotation.z.toFixed(3)}`);
-    }
+    // Measure feet from the loaded pose.
     gltf.scene.updateWorldMatrix(true, true);
 
     const groundBox = staticGround ? new THREE.Box3().setFromObject(staticGround) : null;
     const floorY = groundBox ? groundBox.max.y : null;
     bodyY.current     = groupRef.current.position.y;
     bodyBaseY.current = groupRef.current.position.y;
-    console.log(`[Spider] base Y = ${bodyBaseY.current.toFixed(3)}, floor Y = ${floorY?.toFixed(3) ?? "none"}`);
 
     // Set targets from the visible foot contact points in the loaded pose
     for (const leg of legs) {
@@ -408,10 +362,9 @@ function SpiderModel({
 
     legsRef.current = legs;
     readyRef.current = headRef.current !== null && legs.length > 0;
-    console.log(`[Spider] IK ready: ${readyRef.current} (${legs.length} legs)`);
   });
 
-  // ── Mouse tracking via canvas bounding rect ───────────────────────────
+  // Track the pointer in canvas coordinates.
   useEffect(() => {
     let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
     const onMove = (e: MouseEvent) => {
@@ -439,11 +392,11 @@ function SpiderModel({
     };
   }, [gl, mouseNDC]);
 
-  // ── Per-frame IK ──────────────────────────────────────────────────────
+  // Run IK each frame.
   useFrame((_, delta) => {
     if (!readyRef.current || !headRef.current) return;
 
-    // ── Idle state ──────────────────────────────────────────────────────
+    // Update idle state.
     const isIdle = isMouseGone.current || isInactive.current;
     if (isIdle) {
       idleBlend.current = Math.min(idleBlend.current + IDLE_BLEND_SPEED * delta, 1);
@@ -493,21 +446,20 @@ function SpiderModel({
   );
 }
 
-// ── Public component ──────────────────────────────────────────────────────────
 export default function SpiderSim() {
   const { profile } = useSettings();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mouseNDC     = useRef(new THREE.Vector2());
   const params       = useRef<SpiderParams>({ ...DEFAULT_SPIDER_PARAMS });
   const [showControls, setShowControls] = useState(false);
-  const [headSmooth, setHeadSmooth] = useState(params.current.headSmooth);
+  const [headSmooth, setHeadSmooth] = useState(0.01 + 0.2 - params.current.headSmooth);
   const [bodyLean, setBodyLean] = useState(params.current.bodyLean);
   const [maxBend, setMaxBend] = useState(params.current.maxBend);
 
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
       <Canvas
-        shadows={profile.high}
+        shadows={profile.high ? "percentage" : false}
         dpr={profile.dpr}
         camera={{ position: [0, 3.5, 11], fov: 42, near: 0.1, far: 100 }}
         onCreated={({ camera }) => camera.lookAt(0, -0.5, -2)}
@@ -519,14 +471,11 @@ export default function SpiderSim() {
         style={{ width: "100%", height: "100%" }}
       >
         <CanvasStatsReporter />
-        {/* ── Always-visible scene scaffold ─────────────────────────────── */}
         <color attach="background" args={["#F5F5F5"]} />
-        {/* High: back key + fill + studio HDRI + contact shadow.
-            Perf: cheap analytic lights only — no shadows, no Environment. */}
+        {/* Quality-dependent lighting. */}
         {profile.high ? (
           <>
             <ambientLight intensity={0.25} color="#ffffff" />
-            {/* Key from behind — same setup as HeroRobot */}
             <directionalLight
               position={[-4, 11, -6]}
               intensity={0.65}
@@ -547,7 +496,7 @@ export default function SpiderSim() {
             <Suspense fallback={null}>
               <Environment preset="studio" environmentIntensity={0.5} />
             </Suspense>
-            {/* Invisible floor that only receives shadows */}
+            {/* Shadow floor */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.25, 0]} receiveShadow>
               <planeGeometry args={[40, 40]} />
               <shadowMaterial transparent opacity={0.35} />
@@ -561,10 +510,10 @@ export default function SpiderSim() {
           </>
         )}
 
-        {/* Grid — visible immediately, confirms canvas is rendering */}
+        {/* Grid */}
         <gridHelper args={[60, 15, "#BBBBBB", "#DDDDDD"]} position={[0, -2.251, 0]} />
 
-        {/* ── Spider model — suspends until spider.glb is ready ───────────── */}
+        {/* Spider model */}
         <Suspense fallback={null}>
           <SpiderModel mouseNDC={mouseNDC} params={params} high={profile.high} />
         </Suspense>
@@ -581,7 +530,9 @@ export default function SpiderSim() {
             step={0.01}
             onChange={(v) => {
               setHeadSmooth(v);
-              params.current.headSmooth = v;
+              // Slider left = no smoothing (instant), right = max smoothing.
+              // Invert so a higher slider value → lower lerp factor (more smoothing).
+              params.current.headSmooth = 0.01 + 0.2 - v;
             }}
           />
           <SliderRow

@@ -86,14 +86,13 @@ function LinkGrid({ children }: { children: React.ReactNode }) {
 export default function AboutPage() {
   return (
     <div className="min-h-screen bg-bg">
-      {/* Hero */}
       <div className="pt-[clamp(5rem,10vw,8rem)] pb-12">
         <div className="mx-auto w-[min(100%-80px,1100px)]">
           <div className="mb-6 flex items-center gap-3 text-[0.67rem] font-bold uppercase tracking-[0.2em] text-text-muted">
             <span className="h-2.5 w-2.5 bg-accent border border-text" style={{ boxShadow: "4px 4px 0 var(--color-text)" }} />
             <span>About this site</span>
           </div>
-          <h1 className="m-0 font-doto text-[clamp(3rem,8vw,7rem)] font-black uppercase leading-[0.82] tracking-[-0.045em]">IK as a visual introduction.</h1>
+          <h1 className="m-0 font-doto text-[clamp(3rem,8vw,7rem)] font-black uppercase leading-[0.82] tracking-[-0.045em]">IK as a visual introduction</h1>
           <p className="mt-6 max-w-2xl text-[0.84rem] leading-[1.85] text-text-muted">
             This website is a small interactive playground for inverse kinematics: how a chain of joints can reach a target, how constraints shape motion, and how interactive 3D scenes can make those ideas easier to understand. It also serves as a practical study in Three.js, React Three Fiber, GLTF rigs, pointer interaction, animation loops, and browser-based realtime graphics.
           </p>
@@ -112,7 +111,6 @@ export default function AboutPage() {
         </div>
       </div>
 
-      {/* Papers */}
       <AlgorithmSection number="01" label="Reading" title="PAPERS_AND_NOTES">
         <LinkGrid>
           {papers.map((paper) => (
@@ -121,7 +119,6 @@ export default function AboutPage() {
         </LinkGrid>
       </AlgorithmSection>
 
-      {/* Projects */}
       <AlgorithmSection number="02" label="References" title="PROJECTS_AND_DEMOS">
         <LinkGrid>
           {projects.map((project) => (
@@ -130,7 +127,6 @@ export default function AboutPage() {
         </LinkGrid>
       </AlgorithmSection>
 
-      {/* Particle experiment */}
       <AlgorithmSection number="03" label="Extra experiment" title="PARTICLE_STUDY">
         <p className="m-0 max-w-3xl text-[0.84rem] leading-[1.85] text-text-muted">
           The particle simulation is kept here as a separate Three.js interaction sketch. It is not part of the IK introduction, but it belongs to the same learning goal: understanding realtime browser graphics through small, tactile experiments.

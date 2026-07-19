@@ -1,6 +1,7 @@
 import { lazy, Suspense, useId, type ReactNode } from "react";
 import DeferredCanvas from "../components/DeferredCanvas.tsx";
 import { algorithmContent, type AlgorithmKey } from "../content/algorithmContent.ts";
+import { CcdStudy, FabrikStudy, JacobianStudy } from "../components/AlgorithmStudies.tsx";
 import { navigate } from "../nav.ts";
 
 const HeroRobot = lazy(() => import("../components/HeroRobot.tsx"));
@@ -114,7 +115,6 @@ function AlgoBox({ algorithm, id }: { algorithm: AlgorithmKey; id: string }) {
   return (
     <section id={id} className="scroll-mt-28 border-t border-border bg-bg py-[clamp(4rem,8vw,7rem)]">
       <div className="mx-auto w-[min(100%-80px,1100px)]">
-        {/* Header */}
         <div className="mb-[clamp(2.5rem,5vw,4rem)] grid grid-cols-[200px_minmax(0,1fr)] gap-[clamp(1.5rem,4vw,4rem)] items-start max-[720px]:grid-cols-1 max-[720px]:gap-4">
           <div className="flex justify-between gap-4 pt-3 border-t-2 border-text text-[0.62rem] font-bold uppercase tracking-[0.18em] text-text-muted">
             <span className="font-doto text-[1.1rem] text-text">{copy.number}</span>
@@ -126,7 +126,6 @@ function AlgoBox({ algorithm, id }: { algorithm: AlgorithmKey; id: string }) {
           </div>
         </div>
 
-        {/* Rows */}
         <div className={ROW}>
           <span className={ROW_LABEL}>{copy.homeIntroTitle}</span>
           <p className={ROW_TEXT}>{copy.homeIntro}</p>
@@ -164,7 +163,10 @@ function AlgoBox({ algorithm, id }: { algorithm: AlgorithmKey; id: string }) {
           </div>
         </div>
 
-        {/* Footer */}
+        {algorithm === "fabrik" && <FabrikStudy />}
+        {algorithm === "ccd" && <CcdStudy />}
+        {algorithm === "jacobian" && <JacobianStudy />}
+
         <div className="flex items-center justify-between pt-6 text-[0.6rem] font-bold uppercase tracking-[0.18em] text-text-muted">
           <span>Three.js · React Three Fiber</span>
           <a

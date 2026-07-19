@@ -1,10 +1,4 @@
-/**
- * ToggleRow – reusable labeled on/off switch for sim controls.
- *
- * Mirrors SliderRow's layout (label + value readout) so both sit
- * cleanly side-by-side inside ControlsPanel.
- * Light-themed to match the navbar's .site-switch style.
- */
+/** Labeled simulation toggle. */
 export function ToggleRow({
   label,
   value,

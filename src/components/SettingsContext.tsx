@@ -43,7 +43,6 @@ interface SettingsContextValue {
   quality: Quality;
   profile: QualityProfile;
   setQuality: (q: Quality) => void;
-  toggleQuality: () => void;
   showStats: boolean;
   toggleStats: () => void;
   // Active-canvas FPS — whichever R3F canvas is currently rendering writes here.
@@ -60,10 +59,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [gpu, setGpu] = useState<string | null>(null);
   const fpsRef = useRef(0);
 
-  const toggleQuality = useCallback(
-    () => setQuality((q) => (q === "high" ? "performance" : "high")),
-    [],
-  );
   const toggleStats = useCallback(() => setShowStats((s) => !s), []);
 
   const value = useMemo<SettingsContextValue>(
@@ -71,14 +66,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       quality,
       profile: qualityProfile(quality),
       setQuality,
-      toggleQuality,
       showStats,
       toggleStats,
       fpsRef,
       gpu,
       setGpu,
     }),
-    [quality, toggleQuality, showStats, toggleStats, gpu],
+    [quality, showStats, toggleStats, gpu],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
