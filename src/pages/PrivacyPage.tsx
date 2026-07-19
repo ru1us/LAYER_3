@@ -24,7 +24,7 @@ export default function PrivacyPage() {
             Privacy Policy
           </h1>
           <p className="mt-6 max-w-2xl text-[0.84rem] leading-[1.85] text-text-muted">
-            Last updated: July 12, 2026
+            Last updated: July 20, 2026
           </p>
 
           <div className="mt-12 space-y-10">
@@ -55,6 +55,9 @@ export default function PrivacyPage() {
                 This website is hosted on GitHub Pages, a service provided by GitHub Inc., 88 Colin P Kelly Jr St, San Francisco, CA 94107, USA.
               </p>
               <p className={P}>
+                GitHub Pages does not set cookies for visitors of this website.
+              </p>
+              <p className={P}>
                 <span className="font-bold text-text">Data that may be processed automatically by GitHub:</span>
               </p>
               <ul className={UL}>
@@ -78,23 +81,34 @@ export default function PrivacyPage() {
                 </a>
               </p>
 
-              <h3 className={H3}>3.2 GoDaddy (DNS Provider)</h3>
+              <h3 className={H3}>3.2 Vercel (Hosting / DNS Provider)</h3>
               <p className={P}>
-                The domain for this website is managed by GoDaddy.com LLC, 14455 N. Hayden Road, Suite 219, Scottsdale, AZ 85260, USA.
+                Parts of this website’s delivery and domain/DNS setup may use Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, USA.
               </p>
               <p className={P}>
-                <span className="font-bold text-text">Data processed by GoDaddy:</span> During DNS queries, GoDaddy may process technical data such as IP addresses.
+                Vercel does not set cookies for visitors of this website in the configuration used here.
               </p>
               <p className={P}>
-                <span className="font-bold text-text">Purpose:</span> DNS resolution and domain management.
+                <span className="font-bold text-text">Data that may be processed automatically by Vercel:</span>
+              </p>
+              <ul className={UL}>
+                <li>IP address</li>
+                <li>Date and time of access</li>
+                <li>Pages visited</li>
+                <li>Browser type and version</li>
+                <li>Operating system</li>
+                <li>Referrer URL (previously visited page)</li>
+              </ul>
+              <p className={P}>
+                <span className="font-bold text-text">Purpose:</span> Technical provision, DNS resolution, security, and operation of the website.
               </p>
               <p className={P}>
-                <span className="font-bold text-text">Legal basis:</span> Art. 6 para. 1 lit. f GDPR (legitimate interest in technical provision of the website).
+                <span className="font-bold text-text">Legal basis:</span> Art. 6 para. 1 lit. f GDPR (legitimate interest in technical provision and security of the website).
               </p>
               <p className={P}>
                 More information:{" "}
-                <a href="https://www.godaddy.com/legal/agreements/privacy-policy" target="_blank" rel="noopener noreferrer" className={LINK}>
-                  GoDaddy Privacy Policy
+                <a href="https://vercel.com/legal/privacy-policy" target="_blank" rel="noopener noreferrer" className={LINK}>
+                  Vercel Privacy Policy
                 </a>
               </p>
             </section>
@@ -135,7 +149,7 @@ export default function PrivacyPage() {
                 <li><span className="font-bold text-text">Right to object (Art. 21 GDPR)</span></li>
               </ul>
               <p className={P}>
-                Because access logs are primarily processed by third-party providers (GitHub, GoDaddy), you may need to contact those providers directly for provider-side log data.
+                Because access logs are primarily processed by third-party providers (GitHub, Vercel), you may need to contact those providers directly for provider-side log data.
               </p>
               <p className={P}>
                 For questions or to exercise your rights, contact:{" "}
