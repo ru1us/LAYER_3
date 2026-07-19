@@ -388,7 +388,7 @@ function OnePassFabrikCanvas() {
           type="button"
           onClick={stepBack}
           disabled={step <= 0}
-          className="flex items-center gap-2 border border-text px-4 py-2 font-mono text-[0.6rem] font-bold uppercase tracking-[0.14em] text-text transition-colors enabled:hover:bg-text enabled:hover:text-accent disabled:opacity-30"
+          className="flex cursor-pointer items-center gap-2 border border-text px-4 py-2 font-mono text-[0.6rem] font-bold uppercase tracking-[0.14em] text-text transition-colors enabled:hover:bg-text enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
         >
           <span aria-hidden>←</span> Backward
         </button>
@@ -398,7 +398,7 @@ function OnePassFabrikCanvas() {
         <button
           type="button"
           onClick={step >= ONE_PASS_STEPS ? () => setStep(0) : stepForward}
-          className="flex items-center gap-2 border border-text px-4 py-2 font-mono text-[0.6rem] font-bold uppercase tracking-[0.14em] text-text transition-colors enabled:hover:bg-text enabled:hover:text-accent"
+          className="flex cursor-pointer items-center gap-2 border border-text px-4 py-2 font-mono text-[0.6rem] font-bold uppercase tracking-[0.14em] text-text transition-colors enabled:hover:bg-text enabled:hover:text-accent"
         >
           {step >= ONE_PASS_STEPS ? <><span aria-hidden>↻</span> Repeat</> : <>Forward <span aria-hidden>→</span></>}
         </button>

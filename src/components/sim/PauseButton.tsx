@@ -9,7 +9,7 @@ export function PauseButton({
   return (
     <button
       onClick={onToggle}
-      className={`group absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-[10px] border px-4 py-2 font-mono text-[0.63rem] font-bold uppercase tracking-[0.12em] transition-all duration-200 ${
+      className={`group absolute bottom-6 right-6 z-20 flex cursor-pointer items-center gap-2 rounded-[10px] border px-4 py-2 font-mono text-[0.63rem] font-bold uppercase tracking-[0.12em] transition-all duration-200 ${
         paused
           ? "border-text bg-accent text-text"
           : "border-text bg-surface-raised text-text-muted hover:text-text"

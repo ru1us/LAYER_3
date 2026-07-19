@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "./SettingsContext";
 import { CanvasStatsReporter } from "./CanvasStats";
-import { ControlsPanel, SliderRow } from "./sim";
+import { ControlsPanel, PauseButton, SliderRow } from "./sim";
 import * as THREE from "three";
 
 const CLAMP_RAD     = Math.PI / 4;          // 45° hard cap on every joint
@@ -451,6 +451,7 @@ export default function SpiderSim() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mouseNDC     = useRef(new THREE.Vector2());
   const params       = useRef<SpiderParams>({ ...DEFAULT_SPIDER_PARAMS });
+  const [paused, setPaused] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [headSmooth, setHeadSmooth] = useState(0.01 + 0.2 - params.current.headSmooth);
   const [bodyLean, setBodyLean] = useState(params.current.bodyLean);
@@ -461,6 +462,7 @@ export default function SpiderSim() {
       <Canvas
         shadows={profile.high ? "percentage" : false}
         dpr={profile.dpr}
+        frameloop={paused ? "never" : "always"}
         camera={{ position: [0, 3.5, 11], fov: 42, near: 0.1, far: 100 }}
         onCreated={({ camera }) => camera.lookAt(0, -0.5, -2)}
         gl={{
@@ -518,6 +520,8 @@ export default function SpiderSim() {
           <SpiderModel mouseNDC={mouseNDC} params={params} high={profile.high} />
         </Suspense>
       </Canvas>
+
+      <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
 
       <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
         <div className="grid md:grid-cols-2 gap-4">

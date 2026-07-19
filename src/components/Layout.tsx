@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useSettings } from "./SettingsContext";
 import { GlobalStatsOverlay } from "./CanvasStats";
+import MobileNotice from "./MobileNotice";
 import { navigate, type Page } from "../nav.ts";
 
 const HOME_SECTIONS = ["fabrik", "ccd", "jacobian"] as const;
@@ -183,6 +184,7 @@ export default function Layout({
       )}
 
       <GlobalStatsOverlay />
+      <MobileNotice />
     </div>
   );
 }
