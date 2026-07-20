@@ -1,4 +1,4 @@
-import { useGLTF, Environment } from "@react-three/drei";
+import { useGLTF, Environment, Html } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Physics, RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
@@ -98,7 +98,82 @@ const FK_JOINTS = [
   { name: "Bone006", label: "Tool" },
 ];
 
-function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high, params, onFkAnglesCaptured, onChainBuilt }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null>; high: boolean; params: React.MutableRefObject<RobotParams>; onFkAnglesCaptured: (angles: Record<string, number>) => void; onChainBuilt: (joints: { name: string; label: string }[]) => void }) {
+const RIG_COLOR = "#e8ff00";
+
+const RIG_OPACITY = 0.72;
+
+function RigSegment({ start, end, opacity }: { start: THREE.Object3D; end: THREE.Object3D; opacity: number }) {
+  const segmentRef = useRef<THREE.Mesh>(null);
+  const jointRef = useRef<THREE.Mesh>(null);
+  const segmentMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const jointMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const startPos = useRef(new THREE.Vector3());
+  const endPos = useRef(new THREE.Vector3());
+  const direction = useRef(new THREE.Vector3());
+  const midpoint = useRef(new THREE.Vector3());
+  const up = useRef(new THREE.Vector3(0, 1, 0));
+
+  useFrame(() => {
+    start.getWorldPosition(startPos.current);
+    end.getWorldPosition(endPos.current);
+    direction.current.subVectors(endPos.current, startPos.current);
+    const length = direction.current.length();
+    if (!segmentRef.current || !jointRef.current || length === 0) return;
+    midpoint.current.addVectors(startPos.current, endPos.current).multiplyScalar(0.5);
+    segmentRef.current.position.copy(midpoint.current);
+    segmentRef.current.scale.set(1, length, 1);
+    segmentRef.current.quaternion.setFromUnitVectors(up.current, direction.current.normalize());
+    jointRef.current.position.copy(startPos.current);
+    if (segmentMatRef.current) segmentMatRef.current.opacity = opacity;
+    if (jointMatRef.current) jointMatRef.current.opacity = opacity;
+  });
+
+  return (
+    <>
+      <mesh ref={segmentRef} renderOrder={20} visible={opacity > 0.01}>
+        <cylinderGeometry args={[0.008, 0.008, 1, 8]} />
+        <meshBasicMaterial ref={segmentMatRef} color={RIG_COLOR} transparent opacity={opacity} depthTest={false} />
+      </mesh>
+      <mesh ref={jointRef} renderOrder={21} visible={opacity > 0.01}>
+        <sphereGeometry args={[0.018, 10, 10]} />
+        <meshBasicMaterial ref={jointMatRef} color={RIG_COLOR} transparent opacity={opacity} depthTest={false} />
+      </mesh>
+    </>
+  );
+}
+
+function EndEffectorMarker({ object, opacity }: { object: THREE.Object3D; opacity: number }) {
+  const markerRef = useRef<THREE.Group>(null);
+  const position = useRef(new THREE.Vector3());
+
+  useFrame(() => {
+    object.getWorldPosition(position.current);
+    markerRef.current?.position.copy(position.current);
+  });
+
+  if (opacity < 0.05) return null;
+
+  return (
+    <group ref={markerRef}>
+      <Html center position={[0, 0.1, 0]} zIndexRange={[40, 0]} style={{ pointerEvents: "none", opacity, transition: "opacity 0.3s ease" }}>
+        <span className="whitespace-nowrap rounded-[5px] border border-text bg-accent px-2 py-1 font-mono text-[0.55rem] font-bold uppercase tracking-[0.12em] text-text">End Effector</span>
+      </Html>
+    </group>
+  );
+}
+
+function RobotRig({ chain, opacity }: { chain: THREE.Object3D[]; opacity: number }) {
+  return (
+    <group>
+      {chain.slice(0, -1).map((joint, index) => (
+        <RigSegment key={joint.uuid} start={joint} end={chain[index + 1]} opacity={opacity} />
+      ))}
+      <EndEffectorMarker object={chain[chain.length - 1]} opacity={opacity} />
+    </group>
+  );
+}
+
+function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high, params, onFkAnglesCaptured, onChainBuilt, rigOpacity }: { eeWorldPos: React.RefObject<THREE.Vector3>; baseWorldPos: React.RefObject<THREE.Vector3>; crosshairRef: React.RefObject<HTMLDivElement | null>; containerRef: React.RefObject<HTMLDivElement | null>; high: boolean; params: React.MutableRefObject<RobotParams>; onFkAnglesCaptured: (angles: Record<string, number>) => void; onChainBuilt: (joints: { name: string; label: string }[]) => void; rigOpacity: number }) {
   const gltf = useGLTF("/robot3.glb");
   const { scene, camera, size, gl } = useThree();
   const glbCamApplied = useRef(false);
@@ -107,6 +182,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
   const armJointsRef = useRef<THREE.Object3D[]>([]);
   const endEffectorRef = useRef<THREE.Object3D | null>(null);
   const boneConfigRef = useRef<Map<THREE.Object3D, BoneConfig>>(new Map());
+  const [visualChain, setVisualChain] = useState<THREE.Object3D[]>([]);
   const mouseNDC = useRef(new THREE.Vector2(0, 0));
   const raycaster = useRef(new THREE.Raycaster());
 
@@ -211,6 +287,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
         armJointsRef.current = chain.slice(1, -1);
         const ee = nameMap.get("endeffector");
         endEffectorRef.current = ee || chain[chain.length - 1];
+        setVisualChain([chain[0], ...chain.slice(1, -1), endEffectorRef.current]);
         setTimeout(() => setupBoneConfig(), 0);
         // Notify parent of bendable joints (base + arm joints, excluding end-effector)
         const bendable = [chain[0], ...chain.slice(1, -1)].filter(Boolean) as THREE.Object3D[];
@@ -580,6 +657,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
         </>
       )}
       <primitive object={gltf.scene} />
+      {rigOpacity > 0.01 && visualChain.length > 1 && <RobotRig chain={visualChain} opacity={rigOpacity} />}
     </>
   );
 }
@@ -803,7 +881,7 @@ function BallSpawner({
   );
 }
 
-export default function HeroRobot() {
+export default function HeroRobot({ showRig = false, presentationMode = false, showGame = true }: { showRig?: boolean; presentationMode?: boolean; showGame?: boolean }) {
   const { profile } = useSettings();
   const eeWorldPos = useRef(new THREE.Vector3());
   const baseWorldPos = useRef(new THREE.Vector3());
@@ -826,6 +904,8 @@ export default function HeroRobot() {
   const [boneBend, setBoneBend] = useState<Record<string, number>>({ ...params.current.boneBend });
   const [chainJoints, setChainJoints] = useState<{ name: string; label: string }[]>([]);
   const [fkAngles, setFkAngles] = useState<Record<string, number>>({});
+  const [rigOpacity, setRigOpacity] = useState(showRig ? RIG_OPACITY : 0);
+  const rigOpacityRef = useRef(showRig ? RIG_OPACITY : 0);
 
   const maxBalls = profile.high ? MAX_BALLS_HIGH : MAX_BALLS_PERF;
 
@@ -839,6 +919,32 @@ export default function HeroRobot() {
       window.removeEventListener("mouseup", up);
     };
   }, []);
+
+  useEffect(() => {
+    const target = showRig ? RIG_OPACITY : 0;
+    if (!presentationMode) {
+      rigOpacityRef.current = target;
+      setRigOpacity(target);
+      return;
+    }
+
+    let frame = 0;
+    const duration = 1600;
+    const from = rigOpacityRef.current;
+    const started = performance.now();
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - started) / duration);
+      const eased = t * t * (3 - 2 * t);
+      const next = from + (target - from) * eased;
+      rigOpacityRef.current = next;
+      setRigOpacity(next);
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [presentationMode, showRig]);
 
   return (
     <div ref={containerRef} className="w-full h-full cursor-none">
@@ -856,15 +962,17 @@ export default function HeroRobot() {
       >
         <CanvasStatsReporter />
         <Physics gravity={[0, -9.81, 0]}>
-          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} high={profile.high} params={params} onFkAnglesCaptured={setFkAngles} onChainBuilt={setChainJoints} />
+          <RobotScene eeWorldPos={eeWorldPos} baseWorldPos={baseWorldPos} crosshairRef={crosshairRef} containerRef={containerRef} high={profile.high} params={params} onFkAnglesCaptured={setFkAngles} onChainBuilt={setChainJoints} rigOpacity={rigOpacity} />
           <gridHelper args={[10, 10, "#BBBBBB", "#DDDDDD"]} position={[0, 0, 0]} />
           {/* Back edge stays open. */}
           <CuboidCollider args={[5, 0.5, 2]} position={[0, -0.5, 1.5]} />
-          <BallSpawner
-            eeWorldPos={eeWorldPos}
-            mouseDown={mouseDown}
-            maxBalls={maxBalls}
-          />
+          {showGame && (
+            <BallSpawner
+              eeWorldPos={eeWorldPos}
+              mouseDown={mouseDown}
+              maxBalls={maxBalls}
+            />
+          )}
         </Physics>
       </Canvas>
 
@@ -881,6 +989,7 @@ export default function HeroRobot() {
         </svg>
       </div>
 
+      {(!presentationMode || showRig) && (
       <ControlsPanel
         open={showControls}
         onToggle={() => {
@@ -1047,8 +1156,9 @@ export default function HeroRobot() {
           </div>
         )}
       </ControlsPanel>
+      )}
 
-      <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
+      {!presentationMode && <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />}
     </div>
   );
 }

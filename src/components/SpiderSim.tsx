@@ -219,10 +219,12 @@ function SpiderModel({
   mouseNDC,
   params,
   high,
+  interactive = true,
 }: {
   mouseNDC: React.RefObject<THREE.Vector2>;
   params: React.MutableRefObject<SpiderParams>;
   high: boolean;
+  interactive?: boolean;
 }) {
   const gltf = useGLTF("/spider3.glb");
   const gl = useThree((s) => s.gl);
@@ -366,6 +368,12 @@ function SpiderModel({
 
   // Track the pointer in canvas coordinates.
   useEffect(() => {
+    if (!interactive) {
+      isMouseGone.current = true;
+      isInactive.current = true;
+      mouseNDC.current.set(0, 0);
+      return;
+    }
     let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
     const onMove = (e: MouseEvent) => {
       const el = gl.domElement;
@@ -390,14 +398,14 @@ function SpiderModel({
       window.removeEventListener("mousemove", onMove);
       if (inactivityTimer) clearTimeout(inactivityTimer);
     };
-  }, [gl, mouseNDC]);
+  }, [gl, interactive, mouseNDC]);
 
   // Run IK each frame.
   useFrame((_, delta) => {
     if (!readyRef.current || !headRef.current) return;
 
     // Update idle state.
-    const isIdle = isMouseGone.current || isInactive.current;
+    const isIdle = !interactive || isMouseGone.current || isInactive.current;
     if (isIdle) {
       idleBlend.current = Math.min(idleBlend.current + IDLE_BLEND_SPEED * delta, 1);
       idleTime.current += delta;
@@ -446,7 +454,7 @@ function SpiderModel({
   );
 }
 
-export default function SpiderSim() {
+export default function SpiderSim({ presentationMode = false }: { presentationMode?: boolean } = {}) {
   const { profile } = useSettings();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mouseNDC     = useRef(new THREE.Vector2());
@@ -458,7 +466,7 @@ export default function SpiderSim() {
   const [maxBend, setMaxBend] = useState(params.current.maxBend);
 
   return (
-    <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
+    <div ref={containerRef} className={presentationMode ? "h-full w-full" : undefined} style={presentationMode ? undefined : { position: "absolute", inset: 0 }}>
       <Canvas
         shadows={profile.high ? "percentage" : false}
         dpr={profile.dpr}
@@ -517,12 +525,13 @@ export default function SpiderSim() {
 
         {/* Spider model */}
         <Suspense fallback={null}>
-          <SpiderModel mouseNDC={mouseNDC} params={params} high={profile.high} />
+          <SpiderModel mouseNDC={mouseNDC} params={params} high={profile.high} interactive={!presentationMode} />
         </Suspense>
       </Canvas>
 
-      <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
+      {!presentationMode && <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />}
 
+      {!presentationMode && (
       <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
         <div className="grid md:grid-cols-2 gap-4">
           <SliderRow
@@ -565,6 +574,7 @@ export default function SpiderSim() {
           />
         </div>
       </ControlsPanel>
+      )}
     </div>
   );
 }

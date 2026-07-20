@@ -25,16 +25,15 @@ export function qualityProfile(q: Quality): QualityProfile {
   };
 }
 
-// Auto-detect a sensible default based on the device. Weak machines (few logical
-// cores) and coarse-pointer devices (phones/tablets) default to performance.
+// Auto-detect a sensible default based on the device. Coarse-pointer devices
+// (phones/tablets) default to performance; desktops start in high quality.
 function detectDefaultQuality(): Quality {
   if (typeof navigator === "undefined") return "high";
-  const cores = navigator.hardwareConcurrency ?? 4;
   const coarsePointer =
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function" &&
     window.matchMedia("(pointer: coarse)").matches;
-  if (cores <= 4 || coarsePointer) return "performance";
+  if (coarsePointer) return "performance";
   return "high";
 }
 

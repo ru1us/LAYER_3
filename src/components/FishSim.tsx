@@ -410,7 +410,7 @@ function FishScene({
   );
 }
 
-export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObject<SimParams> }) {
+export default function FishSim({ paramsRef, presentationMode = false }: { paramsRef?: React.MutableRefObject<SimParams>; presentationMode?: boolean }) {
   const { profile } = useSettings();
   const internalParamsRef = useRef<SimParams>(DEFAULT_SIM_PARAMS);
   const params = paramsRef ?? internalParamsRef;
@@ -480,10 +480,10 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
   }
 
   return (
-    <div className="relative z-10 bg-bg border-b border-border">
+    <div className={`relative z-10 ${presentationMode ? "h-full bg-transparent" : "bg-bg border-b border-border"}`}>
       <section
         ref={sectionRef}
-        className="relative bg-bg h-screen"
+        className={`relative ${presentationMode ? "h-full bg-transparent" : "h-screen bg-bg"}`}
         onMouseMove={onMouseMove}
         onMouseEnter={() => { mouseInCanvas.current = true; }}
         onMouseLeave={() => {
@@ -519,8 +519,9 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
         </defs>
       </svg>
 
-      <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />
+      {!presentationMode && <PauseButton paused={paused} onToggle={() => setPaused((p) => !p)} />}
 
+      {!presentationMode && (
       <ControlsPanel open={showControls} onToggle={() => setShowControls((v) => !v)}>
         <div className="grid md:grid-cols-2 gap-4">
           <SliderRow
@@ -557,18 +558,21 @@ export default function FishSim({ paramsRef }: { paramsRef?: React.MutableRefObj
           />
         </div>
       </ControlsPanel>
+      )}
 
       <div style={profile.high ? { filter: "url(#water-distort)" } : undefined} className="relative z-10 w-full h-full">
-          <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-            <div className="absolute inset-0 flex items-center justify-center px-8">
-              <div ref={bgTitleRef} className="text-center opacity-70 will-change-transform">
-                <h1 className="font-doto text-[10rem] md:text-[13rem] leading-none text-[#111310]">LAYER_3</h1>
-                <p className="font-mono text-body text-[#444444] mt-4 max-w-120 mx-auto">
-                  An interactive introduction to inverse kinematics. Rendered live in the browser with Three.js.
-                </p>
+          {!presentationMode && (
+            <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+              <div className="absolute inset-0 flex items-center justify-center px-8">
+                <div ref={bgTitleRef} className="text-center opacity-70 will-change-transform">
+                  <h1 className="font-doto text-[10rem] md:text-[13rem] leading-none text-[#111310]">LAYER_3</h1>
+                  <p className="font-mono text-body text-[#444444] mt-4 max-w-120 mx-auto">
+                    An interactive introduction to inverse kinematics. Rendered live in the browser with Three.js.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div
             ref={bgGridRef}

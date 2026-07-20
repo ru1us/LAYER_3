@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type Page = "home" | "about" | "styleguide" | "imprint" | "privacy";
+export type Page = "home" | "about" | "styleguide" | "imprint" | "privacy" | "presentation";
 
 function locationKey() {
   return window.location.pathname + window.location.hash;
@@ -10,6 +10,8 @@ function locationKey() {
 export function getPage(pathname: string): Page {
   const path = pathname.replace(/\/+$/, "") || "/";
   switch (path) {
+    case "/presentation":
+      return "presentation";
     case "/about":
       return "about";
     case "/styleguide":

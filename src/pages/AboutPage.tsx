@@ -7,23 +7,23 @@ const ParticleSim = lazy(() => import("../components/ParticleSim.tsx"));
 const papers = [
   {
     title: "FABRIK: A fast, iterative solver for the Inverse Kinematics problem",
-    meta: "Aristidou & Lasenby · Graphical Models · 2011",
+    meta: "Aristidou & Lasenby · Graphical Models · 2011 · Free PDF",
     href: "https://www.andreasaristidou.com/publications/papers/FABRIK.pdf",
   },
   {
     title: "Introduction to Inverse Kinematics with Jacobian Transpose, Pseudoinverse and Damped Least Squares methods",
-    meta: "Samuel R. Buss · survey notes · 2004",
+    meta: "Samuel R. Buss · survey notes · 2004 · Free PDF",
     href: "https://mathweb.ucsd.edu/~sbuss/ResearchWeb/ikmethods/iksurvey.pdf",
   },
   {
-    title: "Inverse Kinematic Solutions With Singularity Robustness for Robot Manipulator Control",
-    meta: "Nakamura & Hanafusa · ASME · 1986",
-    href: "https://doi.org/10.1115/1.3143764",
+    title: "Singularity-Robust Inverse Kinematics for Serial Manipulators",
+    meta: "Ignacy Dulęba · JAMRIS · 2024 · Open Access",
+    href: "https://www.jamris.org/index.php/JAMRIS/article/view/878",
   },
   {
-    title: "Resolved Motion Rate Control of Manipulators and Human Prostheses",
-    meta: "Whitney · IEEE · 1969",
-    href: "https://doi.org/10.1109/T-MMS.1969.299896",
+    title: "A General Approach Based on Newton’s Method and Cyclic Coordinate Descent Method for Solving the Inverse Kinematics",
+    meta: "Wang et al. · Applied Sciences · 2019 · Open Access",
+    href: "https://www.mdpi.com/2076-3417/9/24/5461",
   },
 ];
 
