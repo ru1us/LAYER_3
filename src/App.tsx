@@ -15,7 +15,8 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.altKey || event.key.toLowerCase() !== "p") return;
+      if (event.key.toLowerCase() !== "p") return;
+      if (!(event.metaKey || event.ctrlKey)) return;
       event.preventDefault();
       if (page === "presentation") leavePresentation();
       else enterPresentation(`${pathname}${hash}`);

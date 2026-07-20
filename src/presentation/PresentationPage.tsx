@@ -190,7 +190,7 @@ export default function PresentationPage() {
                 ["GPU / Darstellung", "Rendern", "Geometrie und Materialien", "Licht- und Schattenberechnung", "Pixel, Transparenz und Effekte", "Viele parallele Operationen pro Frame"],
               ].map(([kicker, title, ...items]) => <section className="bg-bg/95 p-[clamp(1.4rem,3vw,2.8rem)]" key={kicker}><span className="block text-[clamp(.7rem,.85vw,.82rem)] font-bold uppercase tracking-[.15em] text-text">{kicker}</span><h2 className="my-[clamp(.9rem,1.6vw,1.4rem)] font-mono text-[clamp(1.45rem,2.4vw,2.3rem)] font-black uppercase leading-none tracking-[-.03em]">{title}</h2><ul className="m-0 grid list-none gap-[clamp(.7rem,1.2vw,1rem)] p-0">{items.map((item) => <li className={BULLET_ITEM} key={item}>{item}</li>)}</ul></section>)}
             </div>
-            <p className="mt-5 bg-bg/65 py-3 text-[clamp(.78rem,1vw,.98rem)] font-medium leading-[1.65] text-text">Performance-Modus reduziert Pixel-Dichte, Antialiasing, Schatten und teure Effekte. Die Algorithmen bleiben unverändert.</p>
+            <p className="mt-5 py-3 text-[clamp(.78rem,1vw,.98rem)] font-medium leading-[1.65] text-text">Performance-Modus reduziert Pixel-Dichte, Antialiasing, Schatten und teure Effekte. Die Algorithmen bleiben unverändert.</p>
           </article>
         )}
 

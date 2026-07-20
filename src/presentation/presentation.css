@@ -7,14 +7,9 @@
 }
 
 .presentation-glass {
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.22) 0%,
-    rgba(255, 255, 255, 0.08) 48%,
-    rgba(245, 245, 242, 0.12) 100%
-  );
-  backdrop-filter: blur(14px) saturate(1.35) brightness(1.04);
-  -webkit-backdrop-filter: blur(14px) saturate(1.35) brightness(1.04);
+  background: rgba(245, 245, 242, 0.22);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   opacity: 1;
   transition:
     opacity 1.7s cubic-bezier(0.22, 0.61, 0.36, 1),
@@ -24,21 +19,16 @@
 }
 
 .presentation-glass--clear {
-  background: rgba(255, 255, 255, 0);
-  backdrop-filter: blur(0px) saturate(1) brightness(1);
-  -webkit-backdrop-filter: blur(0px) saturate(1) brightness(1);
+  background: rgba(245, 245, 242, 0);
+  backdrop-filter: blur(0);
+  -webkit-backdrop-filter: blur(0);
   opacity: 0;
 }
 
 .presentation-glass--milky {
-  background: linear-gradient(
-    165deg,
-    rgb(255, 255, 255) 0%,
-    rgba(245, 245, 242, 0.219) 48%,
-    rgba(233, 233, 230, 0.027) 100%
-  );
-  backdrop-filter: blur(22px) saturate(1.12) brightness(1.02);
-  -webkit-backdrop-filter: blur(22px) saturate(1.12) brightness(1.02);
+  background: rgba(245, 245, 242, 0.55);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
   opacity: 1;
 }
 
