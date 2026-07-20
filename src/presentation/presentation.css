@@ -7,7 +7,7 @@
 }
 
 .presentation-glass {
-  background: rgba(245, 245, 242, 0.22);
+  background: rgba(245, 245, 242, 0.45);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   opacity: 1;
@@ -18,11 +18,19 @@
     background 1.7s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
+@supports (backdrop-filter: blur(1px)) {
+  .presentation-glass {
+    background: rgba(245, 245, 242, 0.22);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+}
+
 .presentation-glass--clear {
-  background: rgba(245, 245, 242, 0);
+  background: transparent;
   backdrop-filter: blur(0);
   -webkit-backdrop-filter: blur(0);
-  opacity: 0;
+  opacity: 1;
 }
 
 .presentation-glass--milky {
