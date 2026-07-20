@@ -15,8 +15,12 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "p") return;
-      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.code !== "KeyI") return;
+      const isApplePlatform = /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+      const shortcutPressed = isApplePlatform
+        ? event.altKey && !event.ctrlKey && !event.metaKey
+        : event.ctrlKey && !event.altKey && !event.metaKey;
+      if (!shortcutPressed) return;
       event.preventDefault();
       if (page === "presentation") leavePresentation();
       else enterPresentation(`${pathname}${hash}`);
