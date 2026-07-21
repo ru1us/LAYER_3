@@ -110,7 +110,7 @@ export default function PresentationPage() {
         }}
       />
       <div className="presentation-scene absolute inset-0 z-0" aria-hidden={!robotVisible && !fishVisible && !spiderVisible}>
-        {robotVisible && <Suspense fallback={<LoadingScene />}><HeroRobot showRig={slide === 1} presentationMode showGame={slide === 1} /></Suspense>}
+        {robotVisible && <Suspense fallback={<LoadingScene />}><HeroRobot showRig={slide === 1} presentationMode showGame={false} /></Suspense>}
         {fishVisible && <Suspense fallback={<LoadingScene />}><FishSim presentationMode /></Suspense>}
         {spiderVisible && (
           <div className="presentation-scene-fade presentation-scene-fade--in absolute inset-0">
