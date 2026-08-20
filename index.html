@@ -4,13 +4,68 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LAYER_3</title>
+    <meta name="theme-color" content="#f5f5f5" />
+
+    <title>LAYER_3 — Inverse Kinematics, Visually Explained</title>
+    <meta
+      name="description"
+      content="An interactive playground for inverse kinematics. Compare the FABRIK, CCD and Jacobian DLS solvers through real-time 3D scenes built with Three.js and React Three Fiber."
+    />
+    <meta
+      name="keywords"
+      content="inverse kinematics, FABRIK, CCD, cyclic coordinate descent, Jacobian, damped least squares, IK solver, Three.js, React Three Fiber, WebGL, robotics, rigging"
+    />
+    <meta name="author" content="Rufus Plaga" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://layer3.space/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="LAYER_3" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://layer3.space/" />
+    <meta property="og:title" content="LAYER_3 — Inverse Kinematics, Visually Explained" />
+    <meta
+      property="og:description"
+      content="An interactive playground for inverse kinematics. Compare the FABRIK, CCD and Jacobian DLS solvers through real-time 3D scenes built with Three.js and React Three Fiber."
+    />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="LAYER_3 — Inverse Kinematics, Visually Explained" />
+    <meta
+      name="twitter:description"
+      content="An interactive playground for inverse kinematics. Compare the FABRIK, CCD and Jacobian DLS solvers through real-time 3D scenes built with Three.js and React Three Fiber."
+    />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Doto:wght,ROND@100..900,100&display=swap" rel="stylesheet" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "LAYER_3",
+        "url": "https://layer3.space/",
+        "description": "An interactive playground for inverse kinematics. Compare the FABRIK, CCD and Jacobian DLS solvers through real-time 3D scenes built with Three.js and React Three Fiber.",
+        "inLanguage": "en",
+        "author": {
+          "@type": "Person",
+          "name": "Rufus Plaga",
+          "url": "https://github.com/ru1us"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>LAYER_3 — Inverse Kinematics, Visually Explained</h1>
+      <p>
+        LAYER_3 is an interactive introduction to inverse kinematics: how a chain of joints reaches a target, how
+        constraints shape motion, and how the FABRIK, CCD and Jacobian DLS solvers differ. The scenes are rendered in
+        real time with Three.js and React Three Fiber, so JavaScript is required to view them.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -108,6 +108,9 @@ export default function AboutPage() {
               </div>
             ))}
           </div>
+          <p className="mt-8 max-w-2xl border-l-2 border-border pl-4 text-[0.72rem] leading-[1.7] text-text-muted">
+            Disclaimer: parts of the code behind this site were written with the help of AI tools. All content was reviewed, adjusted, and tested by hand.
+          </p>
         </div>
       </div>
 
