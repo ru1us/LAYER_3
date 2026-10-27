@@ -15,8 +15,8 @@ export interface SimParams {
 export const DEFAULT_SIM_PARAMS: SimParams = {
   maxBend: Math.PI * (30 / 180),
   orbitRadius: 1.44,
-  forceStrength: 1.0,
-  followSpeed: 0.4,
+  forceStrength: 2.5,
+  followSpeed: 0.6,
 };
 
 // Forward-only FABRIK: the head follows while the tail drags.
@@ -185,12 +185,15 @@ function FishScene({
     _raycaster.current.setFromCamera(ndcMouse.current, camera);
     const hit = _raycaster.current.ray.intersectPlane(_swimPlane.current, _hit.current);
 
+    const dt = Math.min(delta, 0.05) * 2.5; // clamp frame spikes, 4x speed
+    const dtScale = dt * 60; // normalize to 60fps baseline
+
     if (mouseInCanvas.current) {
       // Track the pointer inside the canvas.
       if (hit) smoothTgt.current.set(hit.x, hit.z);
     } else {
       // Orbit when the pointer leaves.
-      wanderAngle.current += 0.012;
+      wanderAngle.current += 0.012 * dtScale;
       const WANDER_R = 2.2;
       smoothTgt.current.set(
         fishPos.current.x + Math.cos(wanderAngle.current) * WANDER_R,
@@ -207,7 +210,6 @@ function FishScene({
     // ── Hover on EE → after 0.5s push fish (EE) away from cursor ─────────
     const CLOSE_R = 0.75;
     const PUSH_HOLD_S = 0.5;
-    const dt = Math.min(delta, 0.05); // clamp frame spikes
     if (mouseInCanvas.current && dist < CLOSE_R) {
       closeHoldTime.current += dt;
       if (closeHoldTime.current >= PUSH_HOLD_S) pushAwayActive.current = true;
@@ -241,7 +243,7 @@ function FishScene({
       const steer = desired.sub(fishVel.current);
       const pushMaxForce = MAX_FORCE_BASE * 4;
       if (steer.length() > pushMaxForce) steer.normalize().multiplyScalar(pushMaxForce);
-      fishVel.current.add(steer);
+      fishVel.current.addScaledVector(steer, dtScale);
     } else if (dist > 0.001) {
       // Increase attraction with distance.
       const seekStrength = Math.min(dist / 8, 1);
@@ -265,16 +267,16 @@ function FishScene({
       const steer = steerTarget.clone().sub(fishVel.current);
       if (steer.length() > MAX_FORCE) steer.normalize().multiplyScalar(MAX_FORCE);
 
-      fishVel.current.add(steer);
+      fishVel.current.addScaledVector(steer, dtScale);
     } else {
       // Exactly on target: bleed residual velocity so it settles instead of looping
-      fishVel.current.multiplyScalar(0.8);
+      fishVel.current.multiplyScalar(Math.pow(0.8, dtScale));
     }
 
     // Extra friction while inside the close zone (stabilizes catch/hover)
     // Not while pushing away — fish needs to leave cleanly.
     if (!pushAwayActive.current && dist < CLOSE_R) {
-      fishVel.current.multiplyScalar(0.72 + 0.28 * closeBlend);
+      fishVel.current.multiplyScalar(Math.pow(0.72 + 0.28 * closeBlend, dtScale));
     }
 
     // Raise the speed cap while fleeing.
@@ -285,7 +287,7 @@ function FishScene({
       fishVel.current.normalize().multiplyScalar(speedCap);
     }
 
-    fishPos.current.add(fishVel.current);
+    fishPos.current.addScaledVector(fishVel.current, dtScale);
 
     const speed = fishVel.current.length();
 
@@ -293,7 +295,7 @@ function FishScene({
     const MAX_ROLL = Math.PI * 0.28; // ~50°
     if (speed > 0.0015) {
       // Soft-follow raw velocity so steering noise is filtered before angle math
-      smoothVel.current.lerp(fishVel.current, 0.12);
+      smoothVel.current.lerp(fishVel.current, 1 - Math.pow(1 - 0.12, dtScale));
 
       if (prevSmoothVel.current.lengthSq() > 1e-8 && smoothVel.current.lengthSq() > 1e-8) {
         const cross = prevSmoothVel.current.x * smoothVel.current.y
@@ -309,17 +311,17 @@ function FishScene({
           instant = THREE.MathUtils.clamp(turnAngle * 14, -MAX_ROLL, MAX_ROLL);
         }
         // Heavy EMA on the target so direction flips don't pop
-        targetRoll.current = THREE.MathUtils.lerp(targetRoll.current, instant, 0.08);
+        targetRoll.current = THREE.MathUtils.lerp(targetRoll.current, instant, 1 - Math.pow(1 - 0.08, dtScale));
       }
       prevSmoothVel.current.copy(smoothVel.current);
     } else {
       smoothVel.current.set(0, 0);
       prevSmoothVel.current.set(0, 0);
-      targetRoll.current = THREE.MathUtils.lerp(targetRoll.current, 0, 0.06);
+      targetRoll.current = THREE.MathUtils.lerp(targetRoll.current, 0, 1 - Math.pow(1 - 0.06, dtScale));
     }
 
     // Slow spring toward target — one clean lean, no wiggle
-    currentRoll.current = THREE.MathUtils.lerp(currentRoll.current, targetRoll.current, 0.07);
+    currentRoll.current = THREE.MathUtils.lerp(currentRoll.current, targetRoll.current, 1 - Math.pow(1 - 0.07, dtScale));
     currentRoll.current = THREE.MathUtils.clamp(currentRoll.current, -MAX_ROLL, MAX_ROLL);
 
     const fabrikTarget = fishPos.current.clone();
@@ -380,7 +382,7 @@ function FishScene({
 
       // Convert to local space.
       const qLocal   = parentWorldQ.clone().invert().multiply(qDesiredWorld);
-      const qClamped = bones[i].quaternion.clone().slerp(qLocal, params.current.followSpeed);
+      const qClamped = bones[i].quaternion.clone().slerp(qLocal, 1 - Math.pow(1 - params.current.followSpeed, dtScale));
       bones[i].quaternion.copy(qClamped);
       parentWorldQ = parentWorldQ.clone().multiply(qClamped);
     }
@@ -425,6 +427,7 @@ export default function FishSim({ paramsRef, presentationMode = false }: { param
   const [showControls, setShowControls] = useState(false);
   const [maxBendDeg, setMaxBendDeg] = useState((params.current.maxBend * 180) / Math.PI);
   const [forceStrength, setForceStrength] = useState(params.current.forceStrength);
+  const [followSpeed, setFollowSpeed] = useState(params.current.followSpeed);
   const [showEffector, setShowEffector] = useState(false);
   const [zoom, setZoom] = useState(120);
 
@@ -439,6 +442,11 @@ export default function FishSim({ paramsRef, presentationMode = false }: { param
   function updateForceStrength(next: number) {
     setForceStrength(next);
     params.current.forceStrength = next;
+  }
+
+  function updateFollowSpeed(next: number) {
+    setFollowSpeed(next);
+    params.current.followSpeed = next;
   }
 
   function updateZoom(next: number) {
@@ -546,6 +554,15 @@ export default function FishSim({ paramsRef, presentationMode = false }: { param
             max={2}
             step={0.01}
             onChange={updateForceStrength}
+          />
+          <SliderRow
+            label="Follow Speed"
+            value={followSpeed}
+            display={followSpeed.toFixed(2)}
+            min={0.1}
+            max={1}
+            step={0.01}
+            onChange={updateFollowSpeed}
           />
           <SliderRow
             label="Zoom"

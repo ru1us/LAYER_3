@@ -20,16 +20,16 @@ interface BoneConfig {
 }
 
 const BONE_FOLLOW: Record<string, number> = {
-  "Bone":    0.035,
-  "Bone001": 0.045,
-  "Bone002": 0.055,
-  "Bone003": 0.065,
-  "Bone004": 0.075,
-  "Bone005": 0.085,
-  "Bone006": 0.095, 
+  "Bone":    0.06,
+  "Bone001": 0.07,
+  "Bone002": 0.08,
+  "Bone003": 0.09,
+  "Bone004": 0.10,
+  "Bone005": 0.11,
+  "Bone006": 0.12,
 };
 
-const TARGET_SMOOTH = 0.08;
+const TARGET_SMOOTH = 0.12;
 const REST_THRESHOLD_Y = -0.75;
 const INACTIVITY_DELAY  = 2.0;
 const DEFAULT_TARGET    = new THREE.Vector3(-0.5, 0.1, 0.25);
@@ -52,7 +52,7 @@ interface RobotParams {
 
 const DEFAULT_ROBOT_PARAMS: RobotParams = {
   targetSmooth: TARGET_SMOOTH,
-  jointFollow: 1,
+  jointFollow: 1.5,
   idleLean: IDLE_BASE_AMP,
   maxBend: 1,
   boneBend: {},
@@ -391,6 +391,9 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
     const ccd = _ccd.current;
     const ray = _ray.current;
 
+    const dt = Math.min(delta, 0.05); // clamp frame spikes
+    const dtScale = dt * 60; // normalize to 60fps baseline
+
     // Refresh the cached joint list.
     if (_allJoints.current.length !== armJoints.length + 1) {
       _allJoints.current = [base, ...armJoints];
@@ -478,7 +481,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
     }
     wasIdle.current = isIdle;
 
-    if (isRestMode.current) smoothTarget.current.lerp(DEFAULT_TARGET, 0.03);
+    if (isRestMode.current) smoothTarget.current.lerp(DEFAULT_TARGET, 1 - Math.pow(1 - 0.03, dtScale));
 
     if (isIdle) {
       idleBlend.current = Math.min(idleBlend.current + IDLE_BLEND_SPEED * delta, 1);
@@ -492,7 +495,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
 
     if (!smoothInitialized.current) { smoothTarget.current.copy(v.target); smoothInitialized.current = true; }
     if (!isRestMode.current) {
-      smoothTarget.current.lerp(v.target, params.current.targetSmooth);
+      smoothTarget.current.lerp(v.target, 1 - Math.pow(1 - params.current.targetSmooth, dtScale));
       smoothTarget.current.y = Math.max(smoothTarget.current.y, 0);
     }
 
@@ -600,7 +603,7 @@ function RobotScene({ eeWorldPos, baseWorldPos, crosshairRef, containerRef, high
 
       const [lMin, lMax] = scaledLimits(cfg, joint.name, params.current);
       joint.rotation[cfg.axis] = THREE.MathUtils.clamp(
-        THREE.MathUtils.lerp(current, goal, speed), lMin, lMax,
+        THREE.MathUtils.lerp(current, goal, 1 - Math.pow(1 - speed, dtScale)), lMin, lMax,
       );
     }
 
@@ -1037,7 +1040,7 @@ export default function HeroRobot({ showRig = false, presentationMode = false, s
                   value={jointFollow}
                   display={`${jointFollow.toFixed(1)}×`}
                   min={0.4}
-                  max={3}
+                  max={4}
                   step={0.1}
                   onChange={(v) => {
                     setJointFollow(v);
